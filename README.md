@@ -1,89 +1,58 @@
+<div align="center">
+
 # DXM Skill
 
-> **DXM — Large-project AI collaboration rules for Codex.**<br>
-> **DXM —— 面向 Codex 的大项目 AI 协作规范生成与约束 Skill。**
+**Codex 大项目 AI 协作规范生成、项目澄清与 Trellis 大开发路由 Skill。**
 
-[![Release](https://img.shields.io/github/v/release/mingisrookie/dxm-skill?include_prereleases&label=release)](https://github.com/mingisrookie/dxm-skill/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+把一个普通项目目录变成可持续维护、可追踪、可验证的 AI 协作工作区：先问清楚，再建档，再按项目规则开发。
 
-DXM is a Codex skill that bootstraps a project-level AI collaboration rule set. When the user runs `/dxm` in a project folder, DXM creates or confirms the standard governance files and instructs future Codex sessions in that folder to follow them.
+[快速使用](#快速使用) · [DXM 工作流](#dxm-工作流) · [Trellis 路由](#dxm--trellis) · [生成文件](#生成文件) · [开发验证](#开发与验证)
 
-DXM 是一个 Codex Skill，用于在项目目录中初始化“大项目 AI 协作规范”。当用户在项目中执行 `/dxm` 时，DXM 会生成或确认一组标准治理文件，并让后续 Codex 会话在该目录内默认遵守这些规则。
+[![release](https://img.shields.io/github/v/release/mingisrookie/dxm-skill?include_prereleases&label=release)](https://github.com/mingisrookie/dxm-skill/releases)
+[![license](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
+[![skill](https://img.shields.io/badge/Codex%20Skill-dxm-111827)](skills/dxm/SKILL.md)
+[![python](https://img.shields.io/badge/Python-3.10%2B-3776AB)](skills/dxm/scripts/scaffold_dxm.py)
+[![workflow](https://img.shields.io/badge/workflow-DXM%20%2B%20Trellis-7c3aed)](#dxm--trellis)
 
----
+[![path](https://img.shields.io/badge/skill%20path-skills%2Fdxm-0f766e)](skills/dxm)
+[![docs](https://img.shields.io/badge/docs-Chinese%20project%20governance-d97706)](#生成文件)
+[![mode](https://img.shields.io/badge/default-project--grill-blue)](#dxm-工作流)
+[![safety](https://img.shields.io/badge/safety-no%20silent%20overwrite-red)](#安全模型)
 
-## Table of Contents / 目录
+</div>
 
-- [Why DXM / 为什么需要 DXM](#why-dxm--为什么需要-dxm)
-- [Features / 功能特性](#features--功能特性)
-- [Generated Files / 生成文件](#generated-files--生成文件)
-- [Installation / 安装](#installation--安装)
-- [Quick Start / 快速开始](#quick-start--快速开始)
-- [Repository Layout / 仓库结构](#repository-layout--仓库结构)
-- [Safety Model / 安全模型](#safety-model--安全模型)
-- [Development / 开发与验证](#development--开发与验证)
-- [Release / 发布](#release--发布)
-- [License / 许可证](#license--许可证)
+## 项目状态
 
----
-
-## Why DXM / 为什么需要 DXM
-
-Large projects fail under AI assistance when the agent only edits the immediate file and forgets the surrounding workflow: architecture boundaries, runtime flow, tests, documentation, secrets, branch rules, and final verification.
-
-DXM turns those expectations into project-local documents that Codex can read and follow before working. It is designed for projects where AI must behave like a disciplined maintainer instead of a one-shot code generator.
-
-大项目接入 AI 后，最容易出问题的不是“不会写代码”，而是 AI 只改眼前文件，忘记架构边界、运行链路、测试、文档、敏感数据、分支规则和最终验证。
-
-DXM 将这些要求固化为项目本地文档，让 Codex 在后续工作前可以先读取并遵守。它适合需要 AI 像长期维护者一样工作的项目，而不是只做一次性代码生成。
-
----
-
-## Features / 功能特性
-
-- **Project-local governance**: Creates an `AGENTS.md` that binds future Codex behavior inside the target folder.
-- **Standard long-term documents**: Generates development rules, runtime-flow documentation, file-structure documentation, and PR workflow guidance.
-- **Non-destructive by default**: Existing hand-maintained documents are preserved unless overwrite is explicitly requested.
-- **Documentation-first maintenance**: Requires docs to stay synchronized with code, runtime flow, and project structure.
-- **Verification discipline**: Encourages staged work, targeted checks, final review, and explicit risk reporting.
-- **Secret-aware defaults**: Treats runtime files, tokens, passwords, API keys, and account data as non-reportable.
-- **Chinese-friendly workflow**: Includes Chinese templates and explicit mojibake/encoding checks for Chinese projects.
-
----
-
-- **项目级约束**：生成 `AGENTS.md`，让当前目录后续 Codex 行为受本地规则约束。
-- **标准长期文档**：生成开发规范、完整链路说明、文件结构说明和 PR 流程说明。
-- **默认非破坏性**：已有人工维护文档不会被静默覆盖，除非用户明确要求覆盖。
-- **文档同步优先**：要求代码、运行链路、文件结构和长期文档保持一致。
-- **验证纪律**：鼓励阶段化开发、定向检查、最终审查和风险显式披露。
-- **敏感信息保护**：默认将 token、密码、API Key、账号数据和运行态文件视为不可回显内容。
-- **中文项目友好**：内置中文模板，并将中文乱码/编码检查作为完成标准之一。
-
----
-
-## Generated Files / 生成文件
-
-When executed in a target project root, DXM creates or confirms the following files:
-
-DXM 在目标项目根目录中会创建或确认以下文件：
-
-| File | Purpose |
+| 项目 | 当前事实 |
 | --- | --- |
-| `AGENTS.md` | Project-level Codex rules and `/dxm` trigger contract. |
-| `项目开发规范（AI协作）.md` | AI/developer collaboration rules, architecture boundaries, testing, docs sync, and final reporting requirements. |
-| `项目完整链路说明.md` | Runtime flow, configuration chain, modes, outputs, state transitions, and troubleshooting map. |
-| `项目文件结构说明.md` | Maintained file/directory ownership and responsibility map. |
-| `开发者AI开发与PR提交流程.md` | Git, branch, PR, GitHub CLI, and merge authorization workflow. |
-
-Existing files are skipped by default. This protects carefully maintained project-specific knowledge from being replaced by generic templates.
-
-默认情况下，已存在文件会被跳过。这可以避免用通用模板覆盖项目中已经长期维护过的高价值文档。
+| 当前发布版 | [`v0.1.0`](https://github.com/mingisrookie/dxm-skill/releases/tag/v0.1.0) |
+| 维护仓库 | <https://github.com/mingisrookie/dxm-skill> |
+| Skill 路径 | `skills/dxm` |
+| 核心脚本 | `skills/dxm/scripts/scaffold_dxm.py` |
+| 普通入口 | `/dxm` |
+| 大开发入口 | `/dxm trellis` / `/dxm 大开发` |
+| 默认原则 | 小修 inline；中大型任务 project-grill 后进入 Trellis |
+| 生成方式 | 默认只补缺失文件，不静默覆盖人工维护文档 |
 
 ---
 
-## Installation / 安装
+## 这是什么
 
-Install this skill from GitHub using Codex's skill installer:
+DXM 是一个 Codex Skill，用来把项目目录初始化成“大项目 AI 协作工作区”。它不是只丢几份模板，而是把项目开发前必须弄清楚的事情固化成流程：
+
+1. 先判断目录是不是项目根。
+2. 首次 `/dxm` 默认进入 `project-grill`，先问清楚项目目标、边界和验收。
+3. 生成或确认 `AGENTS.md` 与四份长期中文项目文档。
+4. 后续 Codex 在该目录里工作时，必须先读这些规则，再分析、开发、测试、同步文档和汇报。
+5. 如果任务变成中大型开发，再把 PRD 和状态交给 Trellis 持久化。
+
+一句话：**DXM 是项目规则层，grill 是开干前澄清层，Trellis 是中大型任务记忆层。**
+
+---
+
+## 快速使用
+
+### 安装
 
 使用 Codex 的 skill installer 从 GitHub 安装：
 
@@ -91,39 +60,36 @@ Install this skill from GitHub using Codex's skill installer:
 install-skill-from-github.py --repo mingisrookie/dxm-skill --path skills/dxm
 ```
 
-Alternatively, copy the `skills/dxm` directory into your Codex skills directory and restart Codex.
-
 也可以手动复制 `skills/dxm` 目录到你的 Codex skills 目录，然后重启 Codex。
 
----
+### 初始化项目
 
-## Quick Start / 快速开始
-
-Open a project folder and ask Codex:
-
-进入一个项目目录后，对 Codex 输入：
+进入项目根目录后，对 Codex 输入：
 
 ```text
 /dxm
 ```
 
-DXM will scaffold the governance files in the current project root. After that, future Codex work in the folder should read and follow `AGENTS.md` plus the generated long-term project documents.
+默认行为不是立刻开干，而是先判断项目状态：
 
-DXM 会在当前项目根目录中生成治理文件。之后，Codex 在该目录中的后续工作应先读取并遵守 `AGENTS.md` 以及生成的长期项目文档。
+| 场景 | 默认处理 |
+| --- | --- |
+| 空文件夹 / 新项目 | `new-project-grill`：问清用户、交付形态、技术栈、范围、验收 |
+| 已有代码 / 文档 | `grill-with-docs`：先读现有材料，再拷问需求和边界 |
+| 小脚本 / demo | `lightweight-grill`：只问阻塞执行的关键问题 |
+| 已有完整 DXM | 不重复 grill，除非要求重梳理 |
+| `scaffold only` / `先别问` | 只生成或补齐模板 |
+| `只分析` / `先看看` | 只读，不初始化、不改文件 |
 
-### Direct script usage / 直接运行脚本
+其中 `new-project-grill` 和 `lightweight-grill` 是 DXM 模式标签，不要求安装同名 skill；实际提问可由 `grill-me`、`grill-with-docs` 或简短内联问答完成。
 
-If you need to run the scaffold script directly:
-
-如果需要直接运行脚本：
+### 直接运行脚本
 
 ```bash
 python skills/dxm/scripts/scaffold_dxm.py --root /path/to/project
 ```
 
-Use overwrite only when you explicitly want to replace generated files:
-
-只有在明确希望覆盖已有生成文件时，才使用覆盖模式：
+只有明确需要覆盖已有生成文件时才使用：
 
 ```bash
 python skills/dxm/scripts/scaffold_dxm.py --root /path/to/project --force
@@ -131,7 +97,73 @@ python skills/dxm/scripts/scaffold_dxm.py --root /path/to/project --force
 
 ---
 
-## Repository Layout / 仓库结构
+## DXM 工作流
+
+DXM 解决的是 AI 维护项目时最容易失控的几件事：
+
+- 只改眼前文件，不看完整链路。
+- 不知道项目目录里哪些文件负责什么。
+- 修改代码后忘记更新长期文档。
+- 没跑验证就说“完成”。
+- 中文文档、注释或日志出现乱码。
+- 把 token、账号、运行态数据写进回复或文档。
+- Git / PR / 合并没有明确授权就继续做。
+
+DXM 会把这些约束写进项目根目录，让后续 Codex 会话能重新读取，而不是依赖聊天记忆。
+
+---
+
+## DXM + Trellis
+
+启用大开发模式：
+
+```text
+/dxm trellis
+```
+
+或直接运行：
+
+```bash
+python skills/dxm/scripts/scaffold_dxm.py --root /path/to/project --trellis --trellis-user <developer-name>
+```
+
+默认路由：
+
+| 任务类型 | 默认方式 |
+| --- | --- |
+| 只读分析、日志查看、解释代码 | DXM inline，不建 Trellis task |
+| 普通小 bug、单文件小修、轻量文档 | DXM inline，不建 Trellis task |
+| 新功能、多模块、架构变化、跨文件重构 | project-grill 后建议或创建 Trellis task |
+| 需求不清但会持续开发 | 先 grill，再把 PRD 写进 `.trellis/tasks/<task>/prd.md` |
+| 长周期、多阶段、容易断上下文 | 默认 Trellis |
+
+`--trellis` 会做这些安全补充：
+
+- 非交互运行 `trellis init --codex -y --skip-existing`。
+- 给 DXM 长期文档追加 Trellis 工作流块。
+- 确保 `.trellis/config.yaml` 中 `session_auto_commit: false`。
+- 给 `trellis-start` 加 Step 0：先读 `AGENTS.md` 和 DXM 长期文档。
+- 给 Trellis workflow 加 DXM no-task override：小修和只读不强制建 task。
+
+---
+
+## 生成文件
+
+DXM 在目标项目根目录创建或确认：
+
+| 文件 | 用途 |
+| --- | --- |
+| `AGENTS.md` | 项目级 Codex 规则、`/dxm` 触发约定、Trellis 路由规则 |
+| `项目开发规范（AI协作）.md` | AI/开发者协作规范、架构边界、测试、文档同步和最终回执要求 |
+| `项目完整链路说明.md` | 项目从配置、输入、执行、状态到输出的完整链路 |
+| `项目文件结构说明.md` | 根目录、源码目录、脚本、配置、运行态文件的职责边界 |
+| `开发者AI开发与PR提交流程.md` | Git、分支、PR、GitHub CLI、合并授权流程 |
+
+默认跳过已有文件，避免覆盖人工长期维护的内容。
+
+---
+
+## 仓库结构
 
 ```text
 skills/dxm/
@@ -153,66 +185,42 @@ skills/dxm/
 
 ---
 
-## Safety Model / 安全模型
+## 安全模型
 
-DXM is intentionally conservative:
+DXM 默认保守：
 
-DXM 默认采用保守策略：
-
-- It does not overwrite existing project documents unless explicitly forced.
-- It treats credentials and runtime state as sensitive.
-- It asks Codex to base conclusions on local evidence, command output, tests, logs, diffs, and runtime behavior.
-- It requires final replies to disclose what was changed, what was verified, what was skipped, and what risks remain.
-
----
-
-- 不会静默覆盖已有项目文档，除非明确使用覆盖模式。
-- 将凭据和运行态状态视为敏感内容。
-- 要求 Codex 基于本地文件、命令输出、测试、日志、diff 和真实运行行为得出结论。
-- 要求最终回执说明改动内容、验证内容、跳过项和残余风险。
+- 不静默覆盖已有项目文档。
+- 不回显真实 token、密码、API Key、账号明细、验证码或密钥内容。
+- 只基于文件、命令输出、测试、日志、diff 和真实运行行为下结论。
+- 最终回执必须说明改了什么、验证了什么、跳过了什么、还有什么风险。
+- Trellis 不得自动 stage、commit、push、PR 或 merge。
 
 ---
 
-## Development / 开发与验证
+## 开发与验证
 
-Validate the skill metadata:
-
-校验 Skill 元数据：
+运行单元测试：
 
 ```bash
-python <path-to-skill-creator>/scripts/quick_validate.py skills/dxm
+python -m unittest discover -s tests -v
 ```
 
-Smoke test the scaffold script:
-
-对脚手架做冒烟测试：
+手动脚手架冒烟：
 
 ```bash
 python skills/dxm/scripts/scaffold_dxm.py --root /tmp/dxm-smoke
 ```
 
-Before publishing, check that the repository does not contain local paths, tokens, API keys, passwords, or project-specific runtime data.
+Trellis 冒烟需要本机已安装 `trellis`：
 
-发布前应检查仓库中没有本机路径、token、API Key、密码或项目专属运行态数据。
+```bash
+python skills/dxm/scripts/scaffold_dxm.py --root /tmp/dxm-trellis-smoke --trellis --trellis-user developer
+```
 
----
-
-## Release / 发布
-
-Current release:
-
-当前版本：
-
-- [v0.1.0](https://github.com/mingisrookie/dxm-skill/releases/tag/v0.1.0)
-
-Release packages are published on the GitHub Releases page.
-
-发布包在 GitHub Releases 页面提供。
+发布前检查仓库中没有本机路径、token、API Key、密码、账号数据或运行态文件。
 
 ---
 
-## License / 许可证
+## License
 
-This project is licensed under the [MIT License](LICENSE).
-
-本项目使用 [MIT License](LICENSE) 许可证。
+MIT，详见 [LICENSE](LICENSE)。
