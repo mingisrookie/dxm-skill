@@ -25,7 +25,7 @@
 
 | 项目 | 当前事实 |
 | --- | --- |
-| 当前发布版 | [`v0.1.0`](https://github.com/mingisrookie/dxm-skill/releases/tag/v0.1.0) |
+| 当前发布版 | [`v0.2.0`](https://github.com/mingisrookie/dxm-skill/releases/tag/v0.2.0) |
 | 维护仓库 | <https://github.com/mingisrookie/dxm-skill> |
 | Skill 路径 | `skills/dxm` |
 | 核心脚本 | `skills/dxm/scripts/scaffold_dxm.py` |
