@@ -25,7 +25,7 @@
 
 | 项目 | 当前事实 |
 | --- | --- |
-| 当前发布版 | [`v0.2.0`](https://github.com/mingisrookie/dxm-skill/releases/tag/v0.2.0) |
+| 当前发布版 | [`v0.3.0`](https://github.com/mingisrookie/dxm-skill/releases/tag/v0.3.0) |
 | 维护仓库 | <https://github.com/mingisrookie/dxm-skill> |
 | Skill 路径 | `skills/dxm` |
 | 核心脚本 | `skills/dxm/scripts/scaffold_dxm.py` |
@@ -89,6 +89,24 @@ install-skill-from-github.py --repo mingisrookie/dxm-skill --path skills/dxm
 python skills/dxm/scripts/scaffold_dxm.py --root /path/to/project
 ```
 
+只查看将要执行的动作、不写文件：
+
+```bash
+python skills/dxm/scripts/scaffold_dxm.py --root /path/to/project --dry-run
+```
+
+非破坏式刷新 DXM 管理的 marker 块，保留人工维护内容：
+
+```bash
+python skills/dxm/scripts/scaffold_dxm.py --root /path/to/project --refresh-blocks
+```
+
+脚本默认拒绝在盘根、用户根、系统目录、依赖目录或构建产物目录初始化。只有你明确确认目标就是项目根时，才加：
+
+```bash
+python skills/dxm/scripts/scaffold_dxm.py --root /path/to/project --allow-broad-root
+```
+
 只有明确需要覆盖已有生成文件时才使用：
 
 ```bash
@@ -144,6 +162,7 @@ python skills/dxm/scripts/scaffold_dxm.py --root /path/to/project --trellis --tr
 - 确保 `.trellis/config.yaml` 中 `session_auto_commit: false`。
 - 给 `trellis-start` 加 Step 0：先读 `AGENTS.md` 和 DXM 长期文档。
 - 给 Trellis workflow 加 DXM no-task override：小修和只读不强制建 task。
+- 在任何 DXM/Trellis marker 写入前预检已有目标文件必须是 UTF-8，避免失败后留下半写入。
 
 ---
 
@@ -160,6 +179,8 @@ DXM 在目标项目根目录创建或确认：
 | `开发者AI开发与PR提交流程.md` | Git、分支、PR、GitHub CLI、合并授权流程 |
 
 默认跳过已有文件，避免覆盖人工长期维护的内容。
+
+生成文件统一写入 UTF-8 + LF。若已有待更新文件不是合法 UTF-8，脚本会停止并提示先转换编码，避免静默制造乱码或混合编码。
 
 ---
 

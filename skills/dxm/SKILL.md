@@ -27,10 +27,17 @@ When the user says `/dxm`:
    - Existing complete DXM docs: do not repeat grill unless the user asks to re-baseline.
    - Subdirectory misfire: tell the user to move to the project root; do not initialize the leaf folder.
    - vendor / dependency / build output: only initialize if the user says this is the thing they maintain or study.
-5. Run the bundled scaffold script after the project intent is clear. Resolve `scripts/scaffold_dxm.py` relative to this skill directory:
+5. Run the bundled scaffold script after the project intent is clear. Resolve `scripts/scaffold_dxm.py` relative to this skill directory. In a standard Codex install this is usually `%USERPROFILE%\.codex\skills\dxm\scripts\scaffold_dxm.py`; in a repo checkout use `skills/dxm/scripts/scaffold_dxm.py` relative to the checkout root.
 
 ```powershell
-python "<path-to-installed-dxm-skill>\scripts\scaffold_dxm.py" --root "<project-root>"
+$skill = Join-Path $env:USERPROFILE ".codex\skills\dxm"
+python "$skill\scripts\scaffold_dxm.py" --root "<project-root>"
+```
+
+Cross-platform checkout form:
+
+```bash
+python skills/dxm/scripts/scaffold_dxm.py --root "<project-root>"
 ```
 
 6. Ensure these files exist in the project root:
@@ -41,6 +48,7 @@ python "<path-to-installed-dxm-skill>\scripts\scaffold_dxm.py" --root "<project-
    - `开发者AI开发与PR提交流程.md`
 7. Do not overwrite existing project-specific docs unless the user explicitly asks for overwrite. Existing docs are likely hand-curated and higher value than templates.
 8. After scaffolding, read `AGENTS.md` and follow it for the rest of the session.
+9. For read-only planning evidence, use `--dry-run` instead of guessing what scaffold would do. For non-destructive generated-block upgrades, use `--refresh-blocks`; it refreshes DXM marker blocks and preserves manual content outside those blocks. The CLI also has a broad-root guard; use `--allow-broad-root` only when the user explicitly confirms the target really is a drive, home, system, vendor, or build root.
 
 ### `/dxm trellis`
 
@@ -50,10 +58,11 @@ When the user says `/dxm trellis`, `/dxm 大开发`, `/dxm full`, or otherwise a
 2. Run the bundled scaffold script with Trellis enabled:
 
 ```powershell
-python "<path-to-installed-dxm-skill>\scripts\scaffold_dxm.py" --root "<project-root>" --trellis --trellis-user "<developer-name>"
+$skill = Join-Path $env:USERPROFILE ".codex\skills\dxm"
+python "$skill\scripts\scaffold_dxm.py" --root "<project-root>" --trellis --trellis-user "<developer-name>"
 ```
 
-3. This must remain non-destructive: DXM docs are created or appended, existing hand-maintained docs are skipped, and Trellis is initialized non-interactively with `trellis init --codex -y --skip-existing`.
+3. This must remain non-destructive: DXM docs are created when missing, existing hand-maintained docs are preserved, DXM/Trellis marker blocks are appended once or refreshed only inside managed markers, and Trellis is initialized non-interactively with `trellis init --codex -y --skip-existing`.
 4. If `trellis` is not on PATH, finish the normal DXM scaffold and report that Trellis initialization was skipped because the CLI is missing.
 5. When `.trellis/` exists, ensure the DXM safety overrides are present:
    - `session_auto_commit: false` in `.trellis/config.yaml`.
@@ -129,6 +138,7 @@ Before any non-trivial code, test, script, config, documentation, Git, PR, or re
 - skips existing files;
 - appends a DXM block to an existing `AGENTS.md` only if the block is absent;
 - with `--trellis`, initializes Trellis if available and appends DXM/Trellis blocks once;
+- refuses broad roots unless `--allow-broad-root` is explicitly passed;
 - prints a concise created/skipped summary.
 
 Use `--force` only when the user explicitly wants to replace generated files.

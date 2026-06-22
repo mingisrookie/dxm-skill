@@ -1,4 +1,5 @@
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -10,6 +11,19 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "skills" / "dxm" / "scripts" / "scaffold_dxm.py"
+DXM_FILES = [
+    "AGENTS.md",
+    "项目开发规范（AI协作）.md",
+    "项目完整链路说明.md",
+    "项目文件结构说明.md",
+    "开发者AI开发与PR提交流程.md",
+]
+
+
+def assert_lf_only(testcase: unittest.TestCase, path: Path) -> None:
+    data = path.read_bytes()
+    testcase.assertNotIn(b"\r\n", data, f"{path.name} contains CRLF line endings")
+    testcase.assertNotIn(b"\r", data, f"{path.name} contains bare CR line endings")
 
 
 def write_fake_trellis(bin_dir: Path, *, create_start_skill: bool = True, sleep_seconds: int = 0) -> None:
@@ -82,6 +96,128 @@ class ScaffoldDxmTests(unittest.TestCase):
             self.assertIn("scaffold only", agents)
             self.assertIn("只分析", agents)
 
+    def test_scaffold_creates_all_files_with_lf_line_endings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "lf-project"
+            result = self.run_scaffold(root)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for name in DXM_FILES:
+                path = root / name
+                self.assertTrue(path.exists(), name)
+                assert_lf_only(self, path)
+
+    def test_trellis_append_keeps_lf_line_endings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "trellis-lf"
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            write_fake_trellis(bin_dir)
+            env = os.environ.copy()
+            env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
+
+            result = self.run_scaffold(root, "--trellis", env=env)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            assert_lf_only(self, root / "项目完整链路说明.md")
+            assert_lf_only(self, root / "项目文件结构说明.md")
+
+    def test_dry_run_reports_actions_without_writing_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "dry-run-project"
+            result = self.run_scaffold(root, "--dry-run")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("DXM scaffold root:", result.stdout)
+            self.assertIn("would-create: AGENTS.md", result.stdout)
+            self.assertFalse(root.exists())
+
+    def test_existing_non_utf8_file_fails_without_mutating_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "gbk-project"
+            root.mkdir()
+            agents = root / "AGENTS.md"
+            original = "人工维护：中文\n".encode("gbk")
+            agents.write_bytes(original)
+
+            result = self.run_scaffold(root)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not valid UTF-8", result.stderr)
+            self.assertEqual(agents.read_bytes(), original)
+            self.assertFalse((root / "项目开发规范（AI协作）.md").exists())
+
+    def test_sensitive_inventory_matches_common_secret_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "secrets-project"
+            root.mkdir()
+            for name in [".env.production", "server.pem", "id_rsa", "credentials.json", "normal.txt"]:
+                (root / name).write_text("placeholder\n", encoding="utf-8")
+
+            result = self.run_scaffold(root)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            structure = (root / "项目文件结构说明.md").read_text(encoding="utf-8")
+            for name in [".env.production", "server.pem", "id_rsa", "credentials.json"]:
+                self.assertRegex(structure, rf"`{re.escape(name)}`：运行态或敏感数据")
+            self.assertRegex(structure, r"`normal\.txt`：项目文件")
+
+    def test_sensitive_inventory_avoids_false_positives_and_covers_more_secret_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "sensitive-boundary-project"
+            root.mkdir()
+            sensitive = [".npmrc", ".pypirc", ".netrc", "service-account.json", "prod.secret.yaml", "app.keystore"]
+            safe = ["tokenizer.py", "passwordless.md", "secretary-notes.md", "normal.txt"]
+            for name in [*sensitive, *safe]:
+                (root / name).write_text("placeholder\n", encoding="utf-8")
+
+            result = self.run_scaffold(root)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            structure = (root / "项目文件结构说明.md").read_text(encoding="utf-8")
+            for name in sensitive:
+                self.assertRegex(structure, rf"`{re.escape(name)}`：运行态或敏感数据")
+            for name in safe:
+                self.assertRegex(structure, rf"`{re.escape(name)}`：项目文件")
+
+    def test_existing_start_marker_without_end_marker_is_not_duplicated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "marker-project"
+            root.mkdir()
+            agents = root / "AGENTS.md"
+            agents.write_text("manual\n<!-- DXM-RULES:START -->\npartial\n", encoding="utf-8", newline="\n")
+
+            result = self.run_scaffold(root)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            content = agents.read_text(encoding="utf-8")
+            self.assertEqual(content.count("<!-- DXM-RULES:START -->"), 1)
+            self.assertIn("skipped-existing-marker-start: AGENTS.md", result.stdout)
+
+    def test_refresh_blocks_updates_managed_block_and_preserves_manual_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "refresh-project"
+            first = self.run_scaffold(root)
+            self.assertEqual(first.returncode, 0, first.stderr)
+
+            chain = root / "项目完整链路说明.md"
+            content = chain.read_text(encoding="utf-8")
+            start = "<!-- DXM-DOC-RULES:START -->"
+            end = "<!-- DXM-DOC-RULES:END -->"
+            start_index = content.index(start)
+            end_index = content.index(end, start_index) + len(end)
+            stale = content[:start_index] + start + "\n旧版规则块\n" + end + content[end_index:] + "\n\n## 手工补充\nmanual note\n"
+            chain.write_text(stale, encoding="utf-8", newline="\n")
+
+            result = self.run_scaffold(root, "--refresh-blocks")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            refreshed = chain.read_text(encoding="utf-8")
+            self.assertIn("refreshed-managed-block: 项目完整链路说明.md", result.stdout)
+            self.assertNotIn("旧版规则块", refreshed)
+            self.assertIn("## 手工补充\nmanual note", refreshed)
+            self.assertIn("DXM 文档维护规则", refreshed)
+
     def test_trellis_mode_initializes_and_applies_dxm_safety_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "trellis-project"
@@ -124,6 +260,62 @@ class ScaffoldDxmTests(unittest.TestCase):
             self.assertIn("missing-command: trellis init --codex", result.stdout)
             self.assertTrue((root / "AGENTS.md").exists())
             self.assertFalse((root / ".trellis").exists())
+
+    def test_trellis_preflight_rejects_non_utf8_docs_before_mutating_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "trellis-preflight"
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            write_fake_trellis(bin_dir)
+            env = os.environ.copy()
+            env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
+
+            first = self.run_scaffold(root)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            agents_before = (root / "AGENTS.md").read_bytes()
+            bad_doc = root / "项目开发规范（AI协作）.md"
+            original = "人工维护：中文\n".encode("gbk")
+            bad_doc.write_bytes(original)
+
+            result = self.run_scaffold(root, "--trellis", env=env)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not valid UTF-8", result.stderr)
+            self.assertEqual(bad_doc.read_bytes(), original)
+            self.assertEqual((root / "AGENTS.md").read_bytes(), agents_before)
+            self.assertFalse((root / ".trellis").exists())
+
+    def test_dry_run_trellis_reports_existing_safety_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "dry-run-trellis-existing"
+            first = self.run_scaffold(root)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            (root / ".trellis").mkdir()
+            (root / ".trellis" / "config.yaml").write_text("session_auto_commit: true\n", encoding="utf-8")
+            (root / ".trellis" / "workflow.md").write_text("# Workflow\n", encoding="utf-8")
+            (root / ".agents" / "skills" / "trellis-start").mkdir(parents=True)
+            (root / ".agents" / "skills" / "trellis-start" / "SKILL.md").write_text("# trellis-start\n", encoding="utf-8")
+
+            result = self.run_scaffold(root, "--trellis", "--dry-run")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("would-run: trellis init --codex", result.stdout)
+            self.assertIn("would-append-trellis-block: 项目完整链路说明.md", result.stdout)
+            self.assertIn("would-update: .trellis/config.yaml session_auto_commit", result.stdout)
+            self.assertIn("would-append-trellis-block: .trellis/workflow.md DXM no-task routing", result.stdout)
+
+    def test_broad_root_guard_requires_explicit_override(self) -> None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("scaffold_dxm", SCRIPT)
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        self.assertIsNotNone(spec.loader)
+        spec.loader.exec_module(module)
+
+        broad_root = Path(Path.cwd().anchor)
+        self.assertTrue(module.is_broad_root(broad_root))
+        self.assertFalse(module.is_broad_root(Path.cwd()))
 
     def test_trellis_missing_start_skill_is_reported_not_fabricated(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
