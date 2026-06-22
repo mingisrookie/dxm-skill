@@ -2,51 +2,57 @@
 
 # DXM Skill
 
-**Codex 大项目 AI 协作规范生成、项目澄清与 Trellis 大开发路由 Skill。**
+**把普通项目目录升级成可持续维护、可追踪、可验证的 Codex AI 协作工作区。**
 
-把一个普通项目目录变成可持续维护、可追踪、可验证的 AI 协作工作区：先问清楚，再建档，再按项目规则开发。
+先问清楚需求，再生成长期规则；小修 inline，中大型任务接入 Trellis。
+脚手架默认 UTF-8 + LF，只补缺失内容，不静默覆盖人工文档。
 
-[快速使用](#快速使用) · [DXM 工作流](#dxm-工作流) · [Trellis 路由](#dxm--trellis) · [生成文件](#生成文件) · [开发验证](#开发与验证)
+[快速使用](#快速使用) · [v0.3.0 更新](#v030-更新重点) · [DXM 工作流](#dxm-工作流) · [Trellis 路由](#dxm--trellis) · [生成文件](#生成文件)
 
 [![release](https://img.shields.io/github/v/release/mingisrookie/dxm-skill?include_prereleases&label=release)](https://github.com/mingisrookie/dxm-skill/releases)
 [![license](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 [![skill](https://img.shields.io/badge/Codex%20Skill-dxm-111827)](skills/dxm/SKILL.md)
 [![python](https://img.shields.io/badge/Python-3.10%2B-3776AB)](skills/dxm/scripts/scaffold_dxm.py)
-[![workflow](https://img.shields.io/badge/workflow-DXM%20%2B%20Trellis-7c3aed)](#dxm--trellis)
-
-[![path](https://img.shields.io/badge/skill%20path-skills%2Fdxm-0f766e)](skills/dxm)
-[![docs](https://img.shields.io/badge/docs-Chinese%20project%20governance-d97706)](#生成文件)
-[![mode](https://img.shields.io/badge/default-project--grill-blue)](#dxm-工作流)
-[![safety](https://img.shields.io/badge/safety-no%20silent%20overwrite-red)](#安全模型)
 
 </div>
 
-## 项目状态
-
-| 项目 | 当前事实 |
-| --- | --- |
-| 当前发布版 | [`v0.3.0`](https://github.com/mingisrookie/dxm-skill/releases/tag/v0.3.0) |
-| 维护仓库 | <https://github.com/mingisrookie/dxm-skill> |
-| Skill 路径 | `skills/dxm` |
-| 核心脚本 | `skills/dxm/scripts/scaffold_dxm.py` |
-| 普通入口 | `/dxm` |
-| 大开发入口 | `/dxm trellis` / `/dxm 大开发` |
-| 默认原则 | 小修 inline；中大型任务 project-grill 后进入 Trellis |
-| 生成方式 | 默认只补缺失文件，不静默覆盖人工维护文档 |
-
----
-
 ## 这是什么
 
-DXM 是一个 Codex Skill，用来把项目目录初始化成“大项目 AI 协作工作区”。它不是只丢几份模板，而是把项目开发前必须弄清楚的事情固化成流程：
+DXM 不是一次性模板生成器。它把“项目规则、开工前澄清、中大型任务状态”固化到项目根目录，让后续 Codex 会话有可重新读取、可验证的本地事实。
 
-1. 先判断目录是不是项目根。
-2. 首次 `/dxm` 默认进入 `project-grill`，先问清楚项目目标、边界和验收。
-3. 生成或确认 `AGENTS.md` 与四份长期中文项目文档。
-4. 后续 Codex 在该目录里工作时，必须先读这些规则，再分析、开发、测试、同步文档和汇报。
-5. 如果任务变成中大型开发，再把 PRD 和状态交给 Trellis 持久化。
+### 默认怎么处理
+
+| 你关心的事 | DXM 的默认答案 |
+| --- | --- |
+| 项目还没有 AI 协作规则 | 输入 `/dxm`，生成或确认 `AGENTS.md` 和四份长期中文项目文档。 |
+| 需求或边界还不清楚 | 首次 `/dxm` 默认先 `project-grill`，问清目标、范围、风险和验收。 |
+| 只是小修或只读排查 | 走 DXM inline，不强制创建 Trellis task。 |
+| 是多模块、中大型、长期任务 | 用 `/dxm trellis` / `/dxm 大开发`，把 PRD、状态和执行入口交给 Trellis。 |
+| 担心脚手架误写 | 先 `--dry-run` 看计划；默认拒绝盘根、用户根、系统目录、依赖目录和构建产物目录。 |
+| 担心覆盖人工文档 | 默认只创建缺失文件；`--refresh-blocks` 只更新 DXM 管理块，保留人工内容。 |
+
+当前发布版：[`v0.3.0`](https://github.com/mingisrookie/dxm-skill/releases/tag/v0.3.0) · Skill 路径：`skills/dxm` · 核心脚本：`skills/dxm/scripts/scaffold_dxm.py`
+
+### 三层模型
+
+| 层 | 负责什么 | 默认触发 |
+| --- | --- | --- |
+| DXM | 项目规则、长期文档、验证和交付红线 | `/dxm` |
+| project-grill | 开发前澄清目标、边界、验收和风险 | 首次初始化或需求不清 |
+| Trellis | 中大型任务的 PRD、状态、阶段和跨会话记忆 | `/dxm trellis` / `/dxm 大开发` |
 
 一句话：**DXM 是项目规则层，grill 是开干前澄清层，Trellis 是中大型任务记忆层。**
+
+### v0.3.0 更新重点
+
+| 更新 | 作用 |
+| --- | --- |
+| UTF-8 + LF 统一输出 | Windows / macOS / Linux 下生成文件和 diff 更稳定。 |
+| `--dry-run` | 只报告将创建、跳过、刷新或保护的文件，不写磁盘。 |
+| `--refresh-blocks` | 刷新 DXM marker 管理块，保留 marker 外的人工维护内容。 |
+| 不静默覆盖 | 默认只补缺失文件，不静默覆盖已有项目文档。 |
+| broad-root guard | 阻止误在 `G:\`、用户根、系统目录、依赖目录或构建产物目录初始化。 |
+| Trellis preflight | 写入 DXM/Trellis marker 前先确认已有目标文件是 UTF-8，避免半写入。 |
 
 ---
 
@@ -178,7 +184,7 @@ DXM 在目标项目根目录创建或确认：
 | `项目文件结构说明.md` | 根目录、源码目录、脚本、配置、运行态文件的职责边界 |
 | `开发者AI开发与PR提交流程.md` | Git、分支、PR、GitHub CLI、合并授权流程 |
 
-默认跳过已有文件，避免覆盖人工长期维护的内容。
+默认只创建缺失文件，避免覆盖人工长期维护的内容。需要升级 DXM 管理块时，使用 `--refresh-blocks`，脚本只会刷新 marker 内的生成内容。
 
 生成文件统一写入 UTF-8 + LF。若已有待更新文件不是合法 UTF-8，脚本会停止并提示先转换编码，避免静默制造乱码或混合编码。
 
