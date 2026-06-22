@@ -31,7 +31,9 @@ def write_fake_trellis(bin_dir: Path, *, create_start_skill: bool = True, sleep_
     if create_start_skill:
         start_skill_lines = [
             "(root / '.agents' / 'skills' / 'trellis-start').mkdir(parents=True, exist_ok=True)",
-            "(root / '.agents' / 'skills' / 'trellis-start' / 'SKILL.md').write_text('# trellis-start\\n\\n## Steps\\n\\n1. Start the active task.\\n', encoding='utf-8')",
+            "start_skill = root / '.agents' / 'skills' / 'trellis-start' / 'SKILL.md'",
+            "if not start_skill.exists():",
+            "    start_skill.write_text('# trellis-start\\n\\n## Steps\\n\\n1. Start the active task.\\n', encoding='utf-8')",
         ]
     py = bin_dir / "trellis"
     py.write_text(
@@ -44,8 +46,12 @@ def write_fake_trellis(bin_dir: Path, *, create_start_skill: bool = True, sleep_
                 "root = Path.cwd()",
                 "(root / '.trellis' / 'tasks').mkdir(parents=True, exist_ok=True)",
                 "(root / '.trellis' / 'spec').mkdir(parents=True, exist_ok=True)",
-                "(root / '.trellis' / 'config.yaml').write_text('session_auto_commit: true\\n', encoding='utf-8')",
-                "(root / '.trellis' / 'workflow.md').write_text('# Workflow\\n\\nNo active task: create one before implementation.\\n', encoding='utf-8')",
+                "config = root / '.trellis' / 'config.yaml'",
+                "if not config.exists():",
+                "    config.write_text('session_auto_commit: true\\n', encoding='utf-8')",
+                "workflow = root / '.trellis' / 'workflow.md'",
+                "if not workflow.exists():",
+                "    workflow.write_text('# Workflow\\n\\nNo active task: create one before implementation.\\n', encoding='utf-8')",
                 *start_skill_lines,
                 "print('Mode: Codex')",
                 "print('Configuring Codex hooks')",
@@ -167,7 +173,16 @@ class ScaffoldDxmTests(unittest.TestCase):
             root = Path(tmp) / "sensitive-boundary-project"
             root.mkdir()
             sensitive = [".npmrc", ".pypirc", ".netrc", "service-account.json", "prod.secret.yaml", "app.keystore"]
-            safe = ["tokenizer.py", "passwordless.md", "secretary-notes.md", "normal.txt"]
+            safe = [
+                "tokenizer.py",
+                "passwordless.md",
+                "secretary-notes.md",
+                "secret-management.md",
+                "token_utils.py",
+                "password-reset.tsx",
+                "credentials_helper.py",
+                "normal.txt",
+            ]
             for name in [*sensitive, *safe]:
                 (root / name).write_text("placeholder\n", encoding="utf-8")
 
@@ -180,7 +195,7 @@ class ScaffoldDxmTests(unittest.TestCase):
             for name in safe:
                 self.assertRegex(structure, rf"`{re.escape(name)}`：项目文件")
 
-    def test_existing_start_marker_without_end_marker_is_not_duplicated(self) -> None:
+    def test_existing_start_marker_without_end_marker_fails_loudly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "marker-project"
             root.mkdir()
@@ -189,10 +204,28 @@ class ScaffoldDxmTests(unittest.TestCase):
 
             result = self.run_scaffold(root)
 
-            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("incomplete managed block", result.stderr)
             content = agents.read_text(encoding="utf-8")
             self.assertEqual(content.count("<!-- DXM-RULES:START -->"), 1)
-            self.assertIn("skipped-existing-marker-start: AGENTS.md", result.stdout)
+
+    def test_existing_doc_start_marker_without_end_marker_fails_before_mutating_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "doc-marker-project"
+            root.mkdir()
+            agents = root / "AGENTS.md"
+            doc = root / "项目完整链路说明.md"
+            agents.write_text("manual agents\n", encoding="utf-8", newline="\n")
+            doc.write_text("manual\n<!-- DXM-DOC-RULES:START -->\npartial\n", encoding="utf-8", newline="\n")
+            agents_before = agents.read_bytes()
+            doc_before = doc.read_bytes()
+
+            result = self.run_scaffold(root, "--refresh-blocks")
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("incomplete managed block", result.stderr)
+            self.assertEqual(agents.read_bytes(), agents_before)
+            self.assertEqual(doc.read_bytes(), doc_before)
 
     def test_refresh_blocks_updates_managed_block_and_preserves_manual_content(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -303,6 +336,121 @@ class ScaffoldDxmTests(unittest.TestCase):
             self.assertIn("would-append-trellis-block: 项目完整链路说明.md", result.stdout)
             self.assertIn("would-update: .trellis/config.yaml session_auto_commit", result.stdout)
             self.assertIn("would-append-trellis-block: .trellis/workflow.md DXM no-task routing", result.stdout)
+
+    def test_refresh_blocks_updates_existing_trellis_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "refresh-trellis"
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            write_fake_trellis(bin_dir)
+            env = os.environ.copy()
+            env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
+
+            first = self.run_scaffold(root, "--trellis", env=env)
+            self.assertEqual(first.returncode, 0, first.stderr)
+
+            agents = root / "AGENTS.md"
+            agents_text = agents.read_text(encoding="utf-8")
+            agents.write_text(
+                re.sub(
+                    r"<!-- DXM-TRELLIS:START -->.*?<!-- DXM-TRELLIS:END -->",
+                    "<!-- DXM-TRELLIS:START -->\nOLD TRELLIS ROUTING\n<!-- DXM-TRELLIS:END -->",
+                    agents_text,
+                    flags=re.S,
+                ),
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            trellis_start = root / ".agents" / "skills" / "trellis-start" / "SKILL.md"
+            trellis_start_text = trellis_start.read_text(encoding="utf-8")
+            trellis_start.write_text(
+                re.sub(
+                    r"<!-- DXM-TRELLIS-START-STEP0:START -->.*?<!-- DXM-TRELLIS-START-STEP0:END -->",
+                    "<!-- DXM-TRELLIS-START-STEP0:START -->\nOLD STEP0\n<!-- DXM-TRELLIS-START-STEP0:END -->",
+                    trellis_start_text,
+                    flags=re.S,
+                ),
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            workflow = root / ".trellis" / "workflow.md"
+            workflow_text = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                re.sub(
+                    r"<!-- DXM-TRELLIS-WORKFLOW-OVERRIDE:START -->.*?<!-- DXM-TRELLIS-WORKFLOW-OVERRIDE:END -->",
+                    "<!-- DXM-TRELLIS-WORKFLOW-OVERRIDE:START -->\nOLD WORKFLOW OVERRIDE\n<!-- DXM-TRELLIS-WORKFLOW-OVERRIDE:END -->",
+                    workflow_text,
+                    flags=re.S,
+                ),
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            result = self.run_scaffold(root, "--trellis", "--refresh-blocks", env=env)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("refreshed-managed-block: AGENTS.md", result.stdout)
+            self.assertIn("refreshed-managed-block: .agents/skills/trellis-start/SKILL.md DXM Step 0", result.stdout)
+            self.assertIn("refreshed-managed-block: .trellis/workflow.md DXM no-task routing", result.stdout)
+            self.assertNotIn("OLD TRELLIS ROUTING", agents.read_text(encoding="utf-8"))
+            self.assertNotIn("OLD STEP0", trellis_start.read_text(encoding="utf-8"))
+            self.assertNotIn("OLD WORKFLOW OVERRIDE", workflow.read_text(encoding="utf-8"))
+
+    def test_trellis_start_marker_without_end_marker_fails_before_mutating_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "trellis-broken-marker"
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            write_fake_trellis(bin_dir)
+            env = os.environ.copy()
+            env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
+
+            first = self.run_scaffold(root, "--trellis", env=env)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            agents = root / "AGENTS.md"
+            trellis_start = root / ".agents" / "skills" / "trellis-start" / "SKILL.md"
+            trellis_start.write_text(
+                "manual\n<!-- DXM-TRELLIS-START-STEP0:START -->\npartial\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            agents_before = agents.read_bytes()
+
+            result = self.run_scaffold(root, "--trellis", "--refresh-blocks", env=env)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("incomplete managed block", result.stderr)
+            self.assertEqual(agents.read_bytes(), agents_before)
+
+    def test_inventory_depth_can_include_nested_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "inventory-depth"
+            (root / "src" / "app").mkdir(parents=True)
+            (root / "src" / "app" / "main.py").write_text("print('ok')\n", encoding="utf-8")
+
+            result = self.run_scaffold(root, "--inventory-depth", "2")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            structure = (root / "项目文件结构说明.md").read_text(encoding="utf-8")
+            self.assertRegex(structure, r"`src/`：项目目录")
+            self.assertRegex(structure, r"`src/app/`：项目目录")
+            self.assertNotRegex(structure, r"`src/app/main\\.py`")
+
+    def test_self_test_runs_packaged_smoke_checks(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--self-test"],
+            cwd=REPO_ROOT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("DXM self-test OK", result.stdout)
 
     def test_broad_root_guard_requires_explicit_override(self) -> None:
         import importlib.util

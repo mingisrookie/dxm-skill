@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.3.1 - 2026-06-22
+
+### Added
+
+- Added explicit incomplete-marker validation for DXM and Trellis managed blocks; a `START` marker without the matching `END` marker now fails loudly instead of returning success.
+- Added Trellis managed-block refresh support for `DXM-TRELLIS`, `DXM-TRELLIS-START-STEP0`, and `DXM-TRELLIS-WORKFLOW-OVERRIDE` when `--refresh-blocks` is used.
+- Added `--inventory-depth N` to include nested project paths in the generated file inventory.
+- Added `--self-test` so an installed skill can run packaged smoke checks without the repository test suite.
+
+### Changed
+
+- Sensitive-file inventory now avoids token/secret/password/credential keyword false positives for common source and documentation files such as `token_utils.py`, `password-reset.tsx`, and `secret-management.md`, while preserving explicit secret-file matches.
+
 ## v0.3.0 - 2026-06-22
 
 ### Added

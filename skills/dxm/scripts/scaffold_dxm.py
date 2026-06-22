@@ -74,6 +74,42 @@ SENSITIVE_PATTERNS = {
     "*service-account*.json",
 }
 SENSITIVE_TOKEN_RE = re.compile(r"(^|[-_.])(api[-_]?key|credential|credentials|password|secret|token|tokens)([-_.]|$)")
+SOURCE_OR_DOC_SUFFIXES = {
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cs",
+    ".css",
+    ".go",
+    ".h",
+    ".hpp",
+    ".html",
+    ".java",
+    ".js",
+    ".jsx",
+    ".kt",
+    ".kts",
+    ".less",
+    ".md",
+    ".mdx",
+    ".mjs",
+    ".php",
+    ".ps1",
+    ".py",
+    ".pyw",
+    ".rb",
+    ".rs",
+    ".rst",
+    ".sass",
+    ".scala",
+    ".scss",
+    ".sh",
+    ".svelte",
+    ".swift",
+    ".ts",
+    ".tsx",
+    ".vue",
+}
 BROAD_ROOT_NAMES = SKIP_DIRS | {"vendor", "vendors", ".venv", "venv", "site-packages"}
 
 TRELLIS_AGENTS_BLOCK = f"""{TRELLIS_BLOCK_START}
@@ -186,6 +222,14 @@ class UnsafeProjectRootError(Exception):
         super().__init__(f"{root} is too broad for DXM scaffold")
 
 
+class BrokenManagedBlockError(Exception):
+    def __init__(self, path: Path, start_marker: str, end_marker: str) -> None:
+        self.path = path
+        self.start_marker = start_marker
+        self.end_marker = end_marker
+        super().__init__(f"{path} has incomplete managed block {start_marker}")
+
+
 def normalize_lf(content: str) -> str:
     return content.replace("\r\n", "\n").replace("\r", "\n")
 
@@ -224,12 +268,43 @@ def replace_block(existing: str, block: str, start_marker: str, end_marker: str)
     return existing[:start] + block + existing[end:]
 
 
-def is_sensitive_name(name: str) -> bool:
+def managed_block_state(content: str, start_marker: str, end_marker: str) -> str:
+    start = content.find(start_marker)
+    if start == -1:
+        return "missing"
+    end = content.find(end_marker, start + len(start_marker))
+    if end == -1:
+        return "broken"
+    return "complete"
+
+
+def require_complete_managed_block(path: Path, content: str, start_marker: str, end_marker: str) -> None:
+    if managed_block_state(content, start_marker, end_marker) == "broken":
+        raise BrokenManagedBlockError(path, start_marker, end_marker)
+
+
+def check_managed_blocks(path: Path, content: str, marker_pairs: list[tuple[str, str]]) -> None:
+    for start_marker, end_marker in marker_pairs:
+        require_complete_managed_block(path, content, start_marker, end_marker)
+
+
+def scaffold_marker_pairs(filename: str) -> list[tuple[str, str]]:
+    pairs = [(TRELLIS_BLOCK_START, TRELLIS_BLOCK_END)]
+    if filename == "AGENTS.md":
+        return [(DXM_BLOCK_START, DXM_BLOCK_END), *pairs]
+    return [(DXM_DOC_BLOCK_START, DXM_DOC_BLOCK_END), *pairs]
+
+
+def is_sensitive_name(name: str, *, is_file: bool = True) -> bool:
     lowered = name.lower()
     if lowered in SENSITIVE_NAMES:
         return True
     if any(fnmatch.fnmatch(lowered, pattern) for pattern in SENSITIVE_PATTERNS):
         return True
+    if is_file and Path(lowered).suffix in SOURCE_OR_DOC_SUFFIXES:
+        return False
+    if not is_file:
+        return False
     return SENSITIVE_TOKEN_RE.search(lowered) is not None
 
 
@@ -266,47 +341,55 @@ def read_template(name: str) -> str:
     return normalize_lf((template_dir / f"{name}.template").read_text(encoding="utf-8"))
 
 
-def project_inventory(root: Path) -> str:
+def project_inventory(root: Path, depth: int = 1) -> str:
     if not root.exists():
         return "- 当前目录尚不存在；实际 scaffold 会先创建项目根目录。"
 
     lines: list[str] = []
-    for child in sorted(root.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
-        name = child.name
-        if name in SKIP_DIRS:
-            lines.append(f"- `{name}/`：依赖、构建或工具目录；通常不展开维护。")
-            continue
-        if is_sensitive_name(name):
+
+    def visit(directory: Path, current_depth: int, prefix: str = "") -> None:
+        for child in sorted(directory.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+            name = child.name
+            display = f"{prefix}{name}"
+            if name in SKIP_DIRS:
+                lines.append(f"- `{display}/`：依赖、构建或工具目录；通常不展开维护。")
+                continue
+            if is_sensitive_name(name, is_file=child.is_file()):
+                suffix = "/" if child.is_dir() else ""
+                lines.append(f"- `{display}{suffix}`：运行态或敏感数据；只说明用途，不回显真实内容。")
+                continue
             suffix = "/" if child.is_dir() else ""
-            lines.append(f"- `{name}{suffix}`：运行态或敏感数据；只说明用途，不回显真实内容。")
-            continue
-        suffix = "/" if child.is_dir() else ""
-        if child.is_dir():
-            lines.append(f"- `{name}/`：项目目录；首次 /dxm 生成后需要补充职责说明。")
-        else:
-            lines.append(f"- `{name}`：项目文件；首次 /dxm 生成后需要补充职责说明。")
+            if child.is_dir():
+                lines.append(f"- `{display}/`：项目目录；首次 /dxm 生成后需要补充职责说明。")
+                if current_depth < depth:
+                    visit(child, current_depth + 1, f"{display}/")
+            else:
+                lines.append(f"- `{display}`：项目文件；首次 /dxm 生成后需要补充职责说明。")
+
+    visit(root, 1)
     return "\n".join(lines) if lines else "- 当前目录为空；开始开发前补充文件结构。"
 
 
-def render(content: str, root: Path) -> str:
+def render(content: str, root: Path, inventory_depth: int = 1) -> str:
     return (
         content.replace("{{project_name}}", root.name)
         .replace("{{project_root}}", str(root))
         .replace("{{generated_date}}", datetime.now().strftime("%Y-%m-%d"))
-        .replace("{{file_inventory}}", project_inventory(root))
+        .replace("{{file_inventory}}", project_inventory(root, inventory_depth))
     )
 
 
-def dxm_block(root: Path) -> str:
-    return render(read_template("AGENTS.md"), root)
+def dxm_block(root: Path, inventory_depth: int = 1) -> str:
+    return render(read_template("AGENTS.md"), root, inventory_depth)
 
 
 def refresh_managed_block(path: Path, content: str, start_marker: str, end_marker: str, dry_run: bool = False) -> str:
     existing = read_existing_text(path)
-    if start_marker not in existing:
+    state = managed_block_state(existing, start_marker, end_marker)
+    if state == "missing":
         return "would-skip-no-managed-block" if dry_run else "skipped-no-managed-block"
-    if end_marker not in existing:
-        return "would-skip-existing-marker-start" if dry_run else "skipped-existing-marker-start"
+    if state == "broken":
+        raise BrokenManagedBlockError(path, start_marker, end_marker)
 
     block = extract_block(content, start_marker, end_marker)
     updated = replace_block(existing, block or content, start_marker, end_marker)
@@ -318,16 +401,26 @@ def refresh_managed_block(path: Path, content: str, start_marker: str, end_marke
     return "refreshed-managed-block"
 
 
-def ensure_agents(path: Path, root: Path, force: bool, dry_run: bool = False, refresh_blocks: bool = False) -> str:
-    content = dxm_block(root)
+def ensure_agents(
+    path: Path,
+    root: Path,
+    force: bool,
+    dry_run: bool = False,
+    refresh_blocks: bool = False,
+    inventory_depth: int = 1,
+) -> str:
+    content = dxm_block(root, inventory_depth)
     if dry_run:
         if force or not path.exists():
             return "would-create" if not force else "would-write"
         existing = read_existing_text(path)
-        if DXM_BLOCK_START in existing:
-            if refresh_blocks and DXM_BLOCK_END in existing:
+        state = managed_block_state(existing, DXM_BLOCK_START, DXM_BLOCK_END)
+        if state == "broken":
+            raise BrokenManagedBlockError(path, DXM_BLOCK_START, DXM_BLOCK_END)
+        if state == "complete":
+            if refresh_blocks:
                 return "would-refresh-managed-block"
-            return "would-skip-existing" if DXM_BLOCK_END in existing else "would-skip-existing-marker-start"
+            return "would-skip-existing"
         return "would-append-dxm-block"
 
     if force or not path.exists():
@@ -335,10 +428,13 @@ def ensure_agents(path: Path, root: Path, force: bool, dry_run: bool = False, re
         return "created" if not force else "written"
 
     existing = read_existing_text(path)
-    if DXM_BLOCK_START in existing:
+    state = managed_block_state(existing, DXM_BLOCK_START, DXM_BLOCK_END)
+    if state == "broken":
+        raise BrokenManagedBlockError(path, DXM_BLOCK_START, DXM_BLOCK_END)
+    if state == "complete":
         if refresh_blocks:
             return refresh_managed_block(path, content, DXM_BLOCK_START, DXM_BLOCK_END)
-        return "skipped-existing" if DXM_BLOCK_END in existing else "skipped-existing-marker-start"
+        return "skipped-existing"
 
     updated = existing.rstrip("\n") + "\n\n" + content.rstrip("\n") + "\n"
     write_text_lf(path, updated)
@@ -351,6 +447,7 @@ def append_block_once(
     start_marker: str = TRELLIS_BLOCK_START,
     end_marker: str = TRELLIS_BLOCK_END,
     dry_run: bool = False,
+    refresh_blocks: bool = False,
 ) -> str:
     if not path.exists():
         if dry_run:
@@ -360,14 +457,61 @@ def append_block_once(
         return "created"
 
     existing = read_existing_text(path)
-    if start_marker in existing:
-        return "skipped-existing" if end_marker in existing else "skipped-existing-marker-start"
+    state = managed_block_state(existing, start_marker, end_marker)
+    if state == "broken":
+        raise BrokenManagedBlockError(path, start_marker, end_marker)
+    if state == "complete":
+        if refresh_blocks:
+            updated = replace_block(existing, block, start_marker, end_marker)
+            if updated is None or updated == existing:
+                return "would-skip-existing" if dry_run else "skipped-existing"
+            if dry_run:
+                return "would-refresh-managed-block"
+            write_text_lf(path, updated)
+            return "refreshed-managed-block"
+        return "skipped-existing"
 
     if dry_run:
         return "would-append-trellis-block"
     updated = existing.rstrip("\n") + "\n\n" + block.rstrip("\n") + "\n"
     write_text_lf(path, updated)
     return "appended-trellis-block"
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be >= 1")
+    return parsed
+
+
+def run_self_test() -> None:
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="dxm-self-test-") as tmp:
+        root = Path(tmp) / "project"
+        results = scaffold(root, force=False, dry_run=False, refresh_blocks=False, trellis=False, inventory_depth=2)
+        statuses = dict(results)
+        for filename in FILES:
+            path = root / filename
+            if not path.exists():
+                raise AssertionError(f"{filename} was not created")
+            data = path.read_bytes()
+            if b"\r\n" in data or b"\r" in data:
+                raise AssertionError(f"{filename} does not use LF-only line endings")
+            if statuses.get(filename) not in {"created", "appended-dxm-block"}:
+                raise AssertionError(f"{filename} unexpected status: {statuses.get(filename)}")
+
+        agents = (root / "AGENTS.md").read_text(encoding="utf-8")
+        if "project-grill" not in agents:
+            raise AssertionError("AGENTS.md missing project-grill routing")
+
+        dry_root = Path(tmp) / "dry-run-project"
+        dry_results = scaffold(dry_root, force=False, dry_run=True, refresh_blocks=False, trellis=False, inventory_depth=1)
+        if dry_root.exists():
+            raise AssertionError("--dry-run created the target root")
+        if not all(status == "would-create" for _, status in dry_results):
+            raise AssertionError("--dry-run did not report would-create for a new project")
 
 
 def kill_process_tree(process: subprocess.Popen[str]) -> None:
@@ -458,50 +602,74 @@ def ensure_session_auto_commit_disabled(root: Path, dry_run: bool = False) -> st
     return "skipped-existing"
 
 
-def ensure_trellis_start_step0(root: Path, dry_run: bool = False) -> str:
+def ensure_trellis_start_step0(root: Path, dry_run: bool = False, refresh_blocks: bool = False) -> str:
     path = root / ".agents" / "skills" / "trellis-start" / "SKILL.md"
     if not path.exists():
         return "missing-trellis-start-skill"
-    return append_block_once(path, TRELLIS_START_STEP0_BLOCK, TRELLIS_START_STEP0_START, TRELLIS_START_STEP0_END, dry_run)
+    return append_block_once(
+        path,
+        TRELLIS_START_STEP0_BLOCK,
+        TRELLIS_START_STEP0_START,
+        TRELLIS_START_STEP0_END,
+        dry_run,
+        refresh_blocks,
+    )
 
 
-def ensure_trellis_workflow_override(root: Path, dry_run: bool = False) -> str:
+def ensure_trellis_workflow_override(root: Path, dry_run: bool = False, refresh_blocks: bool = False) -> str:
     path = root / ".trellis" / "workflow.md"
-    return append_block_once(path, TRELLIS_WORKFLOW_OVERRIDE_BLOCK, TRELLIS_WORKFLOW_OVERRIDE_START, TRELLIS_WORKFLOW_OVERRIDE_END, dry_run)
+    return append_block_once(
+        path,
+        TRELLIS_WORKFLOW_OVERRIDE_BLOCK,
+        TRELLIS_WORKFLOW_OVERRIDE_START,
+        TRELLIS_WORKFLOW_OVERRIDE_END,
+        dry_run,
+        refresh_blocks,
+    )
 
 
-def ensure_trellis_docs(root: Path, dry_run: bool = False) -> list[tuple[str, str]]:
+def ensure_trellis_docs(root: Path, dry_run: bool = False, refresh_blocks: bool = False) -> list[tuple[str, str]]:
     return [
-        ("AGENTS.md", append_block_once(root / "AGENTS.md", TRELLIS_AGENTS_BLOCK, dry_run=dry_run)),
-        ("项目开发规范（AI协作）.md", append_block_once(root / "项目开发规范（AI协作）.md", TRELLIS_DEV_RULES_BLOCK, dry_run=dry_run)),
-        ("项目文件结构说明.md", append_block_once(root / "项目文件结构说明.md", TRELLIS_FILE_STRUCTURE_BLOCK, dry_run=dry_run)),
-        ("项目完整链路说明.md", append_block_once(root / "项目完整链路说明.md", TRELLIS_CHAIN_BLOCK, dry_run=dry_run)),
+        ("AGENTS.md", append_block_once(root / "AGENTS.md", TRELLIS_AGENTS_BLOCK, dry_run=dry_run, refresh_blocks=refresh_blocks)),
+        (
+            "项目开发规范（AI协作）.md",
+            append_block_once(root / "项目开发规范（AI协作）.md", TRELLIS_DEV_RULES_BLOCK, dry_run=dry_run, refresh_blocks=refresh_blocks),
+        ),
+        (
+            "项目文件结构说明.md",
+            append_block_once(root / "项目文件结构说明.md", TRELLIS_FILE_STRUCTURE_BLOCK, dry_run=dry_run, refresh_blocks=refresh_blocks),
+        ),
+        (
+            "项目完整链路说明.md",
+            append_block_once(root / "项目完整链路说明.md", TRELLIS_CHAIN_BLOCK, dry_run=dry_run, refresh_blocks=refresh_blocks),
+        ),
     ]
 
 
-def ensure_trellis_safety_overrides(root: Path, dry_run: bool = False) -> list[tuple[str, str]]:
+def ensure_trellis_safety_overrides(root: Path, dry_run: bool = False, refresh_blocks: bool = False) -> list[tuple[str, str]]:
     return [
         (".trellis/config.yaml session_auto_commit", ensure_session_auto_commit_disabled(root, dry_run)),
-        (".agents/skills/trellis-start/SKILL.md DXM Step 0", ensure_trellis_start_step0(root, dry_run)),
-        (".trellis/workflow.md DXM no-task routing", ensure_trellis_workflow_override(root, dry_run)),
+        (".agents/skills/trellis-start/SKILL.md DXM Step 0", ensure_trellis_start_step0(root, dry_run, refresh_blocks)),
+        (".trellis/workflow.md DXM no-task routing", ensure_trellis_workflow_override(root, dry_run, refresh_blocks)),
     ]
 
 
 def validate_trellis_update_inputs(root: Path) -> None:
     if not root.exists():
         return
-    paths = [
-        root / "AGENTS.md",
-        root / "项目开发规范（AI协作）.md",
-        root / "项目文件结构说明.md",
-        root / "项目完整链路说明.md",
-        root / ".trellis" / "config.yaml",
-        root / ".agents" / "skills" / "trellis-start" / "SKILL.md",
-        root / ".trellis" / "workflow.md",
+    paths: list[tuple[Path, list[tuple[str, str]]]] = [
+        (root / "AGENTS.md", scaffold_marker_pairs("AGENTS.md")),
+        (root / "项目开发规范（AI协作）.md", scaffold_marker_pairs("项目开发规范（AI协作）.md")),
+        (root / "项目文件结构说明.md", scaffold_marker_pairs("项目文件结构说明.md")),
+        (root / "项目完整链路说明.md", scaffold_marker_pairs("项目完整链路说明.md")),
+        (root / ".trellis" / "config.yaml", []),
+        (root / ".agents" / "skills" / "trellis-start" / "SKILL.md", [(TRELLIS_START_STEP0_START, TRELLIS_START_STEP0_END)]),
+        (root / ".trellis" / "workflow.md", [(TRELLIS_WORKFLOW_OVERRIDE_START, TRELLIS_WORKFLOW_OVERRIDE_END)]),
     ]
-    for path in paths:
+    for path, marker_pairs in paths:
         if path.exists():
-            read_existing_text(path)
+            content = read_existing_text(path)
+            check_managed_blocks(path, content, marker_pairs)
 
 
 def validate_update_inputs(root: Path, force: bool, refresh_blocks: bool, trellis: bool = False) -> None:
@@ -512,19 +680,27 @@ def validate_update_inputs(root: Path, force: bool, refresh_blocks: bool, trelli
         if not path.exists():
             continue
         if not force and (filename == "AGENTS.md" or refresh_blocks or trellis):
-            read_existing_text(path)
+            content = read_existing_text(path)
+            check_managed_blocks(path, content, scaffold_marker_pairs(filename))
 
 
-def scaffold(root: Path, force: bool, dry_run: bool = False, refresh_blocks: bool = False, trellis: bool = False) -> list[tuple[str, str]]:
+def scaffold(
+    root: Path,
+    force: bool,
+    dry_run: bool = False,
+    refresh_blocks: bool = False,
+    trellis: bool = False,
+    inventory_depth: int = 1,
+) -> list[tuple[str, str]]:
     validate_update_inputs(root, force, refresh_blocks, trellis)
     if not dry_run:
         root.mkdir(parents=True, exist_ok=True)
     results: list[tuple[str, str]] = []
     for filename in FILES:
         target = root / filename
-        content = render(read_template(filename), root)
+        content = render(read_template(filename), root, inventory_depth)
         if filename == "AGENTS.md":
-            status = ensure_agents(target, root, force, dry_run, refresh_blocks)
+            status = ensure_agents(target, root, force, dry_run, refresh_blocks, inventory_depth)
         elif dry_run:
             if force or not target.exists():
                 status = "would-write" if force else "would-create"
@@ -575,7 +751,9 @@ def main() -> int:
     parser.add_argument("--root", default=os.getcwd(), help="target project root; defaults to current directory")
     parser.add_argument("--force", action="store_true", help="overwrite existing files; use only on explicit user request")
     parser.add_argument("--dry-run", action="store_true", help="report planned scaffold actions without writing files")
-    parser.add_argument("--refresh-blocks", action="store_true", help="refresh DXM-managed marker blocks while preserving manual content")
+    parser.add_argument("--refresh-blocks", action="store_true", help="refresh DXM/Trellis-managed marker blocks while preserving manual content")
+    parser.add_argument("--inventory-depth", type=positive_int, default=1, help="maximum directory depth to include in the generated file inventory")
+    parser.add_argument("--self-test", action="store_true", help="run packaged DXM scaffold smoke checks and exit")
     parser.add_argument("--allow-broad-root", action="store_true", help="allow scaffolding in a drive, home, system, vendor, or build root")
     parser.add_argument("--trellis", action="store_true", help="also initialize Trellis/Codex big-development workflow")
     parser.add_argument(
@@ -591,14 +769,30 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.self_test:
+        try:
+            run_self_test()
+        except AssertionError as exc:
+            print(f"DXM self-test FAILED: {exc}", file=sys.stderr)
+            return 2
+        print("DXM self-test OK")
+        return 0
+
     root = Path(args.root).resolve()
     try:
         validate_project_root(root, args.allow_broad_root)
         if args.trellis and not args.dry_run:
             validate_trellis_update_inputs(root)
-        results = scaffold(root, args.force, args.dry_run, args.refresh_blocks, args.trellis)
+        results = scaffold(root, args.force, args.dry_run, args.refresh_blocks, args.trellis, args.inventory_depth)
     except ExistingFileEncodingError as exc:
         print(f"Error: {exc.path} is not valid UTF-8; convert it to UTF-8 before DXM can safely update it.", file=sys.stderr)
+        return 2
+    except BrokenManagedBlockError as exc:
+        print(
+            f"Error: {exc.path} has incomplete managed block {exc.start_marker}; "
+            f"restore the matching {exc.end_marker} before DXM can safely update it.",
+            file=sys.stderr,
+        )
         return 2
     except UnsafeProjectRootError as exc:
         print(f"Error: {exc.root} is too broad for DXM scaffold; choose a project root or pass --allow-broad-root explicitly.", file=sys.stderr)
@@ -613,18 +807,32 @@ def main() -> int:
         results.append(("trellis init --codex", status))
         if args.dry_run and (root / ".trellis").exists():
             try:
-                results.extend(ensure_trellis_docs(root, dry_run=True))
-                results.extend(ensure_trellis_safety_overrides(root, dry_run=True))
+                results.extend(ensure_trellis_docs(root, dry_run=True, refresh_blocks=args.refresh_blocks))
+                results.extend(ensure_trellis_safety_overrides(root, dry_run=True, refresh_blocks=args.refresh_blocks))
             except ExistingFileEncodingError as exc:
                 print(f"Error: {exc.path} is not valid UTF-8; convert it to UTF-8 before DXM can safely update it.", file=sys.stderr)
+                return 2
+            except BrokenManagedBlockError as exc:
+                print(
+                    f"Error: {exc.path} has incomplete managed block {exc.start_marker}; "
+                    f"restore the matching {exc.end_marker} before DXM can safely update it.",
+                    file=sys.stderr,
+                )
                 return 2
         if not args.dry_run and (root / ".trellis").exists():
             try:
                 validate_trellis_update_inputs(root)
-                results.extend(ensure_trellis_docs(root))
-                results.extend(ensure_trellis_safety_overrides(root))
+                results.extend(ensure_trellis_docs(root, refresh_blocks=args.refresh_blocks))
+                results.extend(ensure_trellis_safety_overrides(root, refresh_blocks=args.refresh_blocks))
             except ExistingFileEncodingError as exc:
                 print(f"Error: {exc.path} is not valid UTF-8; convert it to UTF-8 before DXM can safely update it.", file=sys.stderr)
+                return 2
+            except BrokenManagedBlockError as exc:
+                print(
+                    f"Error: {exc.path} has incomplete managed block {exc.start_marker}; "
+                    f"restore the matching {exc.end_marker} before DXM can safely update it.",
+                    file=sys.stderr,
+                )
                 return 2
 
     print(f"DXM scaffold root: {root}")

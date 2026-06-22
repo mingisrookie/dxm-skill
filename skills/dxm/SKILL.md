@@ -48,7 +48,8 @@ python skills/dxm/scripts/scaffold_dxm.py --root "<project-root>"
    - `开发者AI开发与PR提交流程.md`
 7. Do not overwrite existing project-specific docs unless the user explicitly asks for overwrite. Existing docs are likely hand-curated and higher value than templates.
 8. After scaffolding, read `AGENTS.md` and follow it for the rest of the session.
-9. For read-only planning evidence, use `--dry-run` instead of guessing what scaffold would do. For non-destructive generated-block upgrades, use `--refresh-blocks`; it refreshes DXM marker blocks and preserves manual content outside those blocks. The CLI also has a broad-root guard; use `--allow-broad-root` only when the user explicitly confirms the target really is a drive, home, system, vendor, or build root.
+9. For read-only planning evidence, use `--dry-run` instead of guessing what scaffold would do. For non-destructive generated-block upgrades, use `--refresh-blocks`; it refreshes DXM and Trellis marker blocks while preserving manual content outside those blocks. Use `--inventory-depth N` only when the initial file-structure seed should include nested paths. Use `--self-test` to verify an installed skill package. The CLI also has a broad-root guard; use `--allow-broad-root` only when the user explicitly confirms the target really is a drive, home, system, vendor, or build root.
+10. If the scaffold reports an incomplete managed block, do not ignore it or claim success. Restore the missing end marker or ask whether to overwrite the affected generated file.
 
 ### `/dxm trellis`
 
@@ -62,7 +63,7 @@ $skill = Join-Path $env:USERPROFILE ".codex\skills\dxm"
 python "$skill\scripts\scaffold_dxm.py" --root "<project-root>" --trellis --trellis-user "<developer-name>"
 ```
 
-3. This must remain non-destructive: DXM docs are created when missing, existing hand-maintained docs are preserved, DXM/Trellis marker blocks are appended once or refreshed only inside managed markers, and Trellis is initialized non-interactively with `trellis init --codex -y --skip-existing`.
+3. This must remain non-destructive: DXM docs are created when missing, existing hand-maintained docs are preserved, DXM/Trellis marker blocks are appended once or refreshed only inside managed markers, incomplete marker pairs fail loudly, and Trellis is initialized non-interactively with `trellis init --codex -y --skip-existing`.
 4. If `trellis` is not on PATH, finish the normal DXM scaffold and report that Trellis initialization was skipped because the CLI is missing.
 5. When `.trellis/` exists, ensure the DXM safety overrides are present:
    - `session_auto_commit: false` in `.trellis/config.yaml`.
