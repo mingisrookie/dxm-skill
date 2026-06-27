@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## v0.3.2 - 2026-06-28
+
+### Added
+
+- Bundled current grill-related skills under `skills/`: `grilling`, `grill-with-docs`, `domain-modeling`, and the legacy `grill-me` alias.
 
 ### Changed
 
