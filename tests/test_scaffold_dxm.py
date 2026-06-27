@@ -98,7 +98,9 @@ class ScaffoldDxmTests(unittest.TestCase):
             self.assertIn("grill-with-docs", agents)
             self.assertIn("lightweight-grill", agents)
             self.assertIn("模式标签", agents)
-            self.assertIn("grill-me", agents)
+            self.assertIn("grilling", agents)
+            self.assertIn("domain-modeling", agents)
+            self.assertIn("grill-me", agents)  # legacy alias remains documented
             self.assertIn("scaffold only", agents)
             self.assertIn("只分析", agents)
 

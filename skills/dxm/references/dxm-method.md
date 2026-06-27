@@ -17,11 +17,11 @@ DXM is a reusable large-project AI collaboration method distilled from a hand-ma
 
 Use the lightest clarification mode that still makes the future project understandable:
 
-- `grill-with-docs`: existing code or docs exist; questions must be grounded in those files.
+- `grill-with-docs`: existing code or docs exist; questions must be grounded in those files and use `domain-modeling` when terminology or ADRs change.
 - `new-project-grill`: empty or brand-new project; ask about user, delivery shape, stack, scope, non-goals, dependencies, acceptance, and maintenance horizon.
 - `lightweight-grill`: scratch/demo/small script; only ask blocking questions.
 
-`new-project-grill` and `lightweight-grill` are DXM mode labels, not mandatory standalone skills. Implement them with `grill-me`, `grill-with-docs`, or concise inline questions depending on available context.
+`new-project-grill` and `lightweight-grill` are DXM mode labels, not mandatory standalone skills. Implement them with `grilling`, `grill-with-docs`, the legacy `grill-me` alias, or concise inline questions depending on available context.
 
 Skip grill only when the user explicitly asks for scaffold-only/read-only behavior, the folder already has complete DXM docs, or the current directory is not the project root.
 

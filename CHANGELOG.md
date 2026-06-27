@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Synced DXM project-grill routing with the current `grilling`, `grill-with-docs`, and `domain-modeling` skill split while preserving `grill-me` as a legacy alias.
+
 ## v0.3.1 - 2026-06-22
 
 ### Added

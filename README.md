@@ -82,14 +82,14 @@ install-skill-from-github.py --repo mingisrookie/dxm-skill --path skills/dxm
 
 | 场景 | 默认处理 |
 | --- | --- |
-| 空文件夹 / 新项目 | `new-project-grill`：问清用户、交付形态、技术栈、范围、验收 |
-| 已有代码 / 文档 | `grill-with-docs`：先读现有材料，再拷问需求和边界 |
+| 空文件夹 / 新项目 | `new-project-grill`：用 `grilling` 问清用户、交付形态、技术栈、范围、验收 |
+| 已有代码 / 文档 | `grill-with-docs`：先读现有材料，再用 `grilling` + `domain-modeling` 拷问需求、边界、术语和 ADR |
 | 小脚本 / demo | `lightweight-grill`：只问阻塞执行的关键问题 |
 | 已有完整 DXM | 不重复 grill，除非要求重梳理 |
 | `scaffold only` / `先别问` | 只生成或补齐模板 |
 | `只分析` / `先看看` | 只读，不初始化、不改文件 |
 
-其中 `new-project-grill` 和 `lightweight-grill` 是 DXM 模式标签，不要求安装同名 skill；实际提问可由 `grill-me`、`grill-with-docs` 或简短内联问答完成。
+其中 `new-project-grill` 和 `lightweight-grill` 是 DXM 模式标签，不要求安装同名 skill；实际提问优先由 `grilling`、`grill-with-docs` 和 `domain-modeling` 完成，旧环境可回退到 legacy `grill-me` 或简短内联问答。
 
 ### 直接运行脚本
 
@@ -172,7 +172,7 @@ python skills/dxm/scripts/scaffold_dxm.py --root /path/to/project --trellis --tr
 | 只读分析、日志查看、解释代码 | DXM inline，不建 Trellis task |
 | 普通小 bug、单文件小修、轻量文档 | DXM inline，不建 Trellis task |
 | 新功能、多模块、架构变化、跨文件重构 | project-grill 后建议或创建 Trellis task |
-| 需求不清但会持续开发 | 先 grill，再把 PRD 写进 `.trellis/tasks/<task>/prd.md` |
+| 需求不清但会持续开发 | 先 `grilling` / `grill-with-docs`，再把 PRD 写进 `.trellis/tasks/<task>/prd.md` |
 | 长周期、多阶段、容易断上下文 | 默认 Trellis |
 
 `--trellis` 会做这些安全补充：

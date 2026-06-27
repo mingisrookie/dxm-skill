@@ -20,10 +20,10 @@ When the user says `/dxm`:
 1. Treat the current working directory as the target project root unless the user gives another path. Do not run this in a broad drive root like `G:\` unless the user explicitly says that is the project root.
 2. If the user says `只分析`, `先看看`, or equivalent read-only language, do not scaffold or edit files. Inspect only and report what DXM would do.
 3. If the user says `scaffold only`, `只生成模板`, or `先别问`, run the scaffold directly and do not grill.
-4. Otherwise classify the target before scaffolding. `new-project-grill` and `lightweight-grill` are DXM mode labels, not required standalone skill names; execute them with the available `grill-with-docs`, `grill-me`, or concise inline questions as appropriate:
-   - Empty folder / new project: use `new-project-grill`.
-   - Existing code or docs: run `grill-with-docs`.
-   - Temporary script / demo: run `lightweight-grill`.
+4. Otherwise classify the target before scaffolding. `new-project-grill` and `lightweight-grill` are DXM mode labels, not required standalone skill names; execute them with the current grill skills (`grilling`, `grill-with-docs`, `domain-modeling`), the legacy `grill-me` alias, or concise inline questions as appropriate:
+   - Empty folder / new project: use `new-project-grill` via `grilling` or the legacy `grill-me` alias.
+   - Existing code or docs: run `grill-with-docs`, which routes the interview through `grilling` plus `domain-modeling`.
+   - Temporary script / demo: run `lightweight-grill` with only blocking questions, using inline questions or `grilling` when useful.
    - Existing complete DXM docs: do not repeat grill unless the user asks to re-baseline.
    - Subdirectory misfire: tell the user to move to the project root; do not initialize the leaf folder.
    - vendor / dependency / build output: only initialize if the user says this is the thing they maintain or study.
@@ -78,11 +78,11 @@ Use these labels consistently so future sessions route the same way:
 
 | Mode | Use when | Ask for |
 | --- | --- | --- |
-| `grill-with-docs` | Existing code, docs, README, manifests, scripts, or runtime evidence exist | Goal, current behavior, architecture boundary, risk, validation, non-goals |
+| `grill-with-docs` | Existing code, docs, README, manifests, scripts, or runtime evidence exist | Goal, current behavior, architecture boundary, domain terms/ADRs, risk, validation, non-goals |
 | `new-project-grill` | Empty folder or a new project with no useful docs | User, delivery shape, stack preference, core scope, non-goals, data/API/security, acceptance criteria, maintenance horizon |
 | `lightweight-grill` | Scratch, demo, one-off script, or very small utility | Only blockers: input/output, success criterion, allowed side effects |
 
-`new-project-grill` and `lightweight-grill` are routing labels. If no same-name skill exists, use `grill-me` or direct inline questions; if existing docs/code are available, prefer `grill-with-docs`.
+`new-project-grill` and `lightweight-grill` are routing labels. If no same-name skill exists, use `grilling` or direct inline questions; `grill-me` remains only a legacy alias. If existing docs/code are available, prefer `grill-with-docs`; when domain terms or ADRs change, also use `domain-modeling`.
 
 Default principle: first `/dxm` is a project setup conversation. Skip grill only for explicit scaffold-only/read-only intent, existing complete DXM, or wrong target directory.
 
