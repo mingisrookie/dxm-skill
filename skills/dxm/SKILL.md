@@ -117,7 +117,7 @@ Before any non-trivial code, test, script, config, documentation, Git, PR, or re
    - `项目文件结构说明.md`
    - `项目完整链路说明.md`
    - `项目开发规范（AI协作）.md`
-3. If Git/PR work is requested, also read `开发者AI开发与PR提交流程.md`.
+3. If Git/PR/release/version/latest work is requested, also read `开发者AI开发与PR提交流程.md`.
 4. Resolve conflicts by observed runtime and current files first, then docs. If docs are stale and the task changes facts, update the docs before reporting completion.
 
 ## DXM operating rules
@@ -129,7 +129,7 @@ Before any non-trivial code, test, script, config, documentation, Git, PR, or re
 - Keep code and docs synchronized: file-structure changes update `项目文件结构说明.md`; runtime-flow changes update `项目完整链路说明.md`; process/boundary changes update `项目开发规范（AI协作）.md`.
 - Treat Chinese encoding as a completion blocker. Check modified Chinese docs, logs, comments, and UI strings for visible mojibake or replacement characters.
 - Protect secrets and runtime data. Never paste real tokens, passwords, API keys, account lists, or credential-bearing state into reports.
-- Final replies must say what changed, what was verified, which docs were synchronized, and what risks or skipped checks remain.
+- Final replies must say what changed, what was verified, which docs were synchronized, and what risks or skipped checks remain. For release work, also report `VERSION`, `CHANGELOG.md`, tag, GitHub Release, Latest status, Chinese release notes, and compare link evidence.
 
 ## Scaffold script notes
 

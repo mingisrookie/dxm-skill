@@ -104,6 +104,44 @@ class ScaffoldDxmTests(unittest.TestCase):
             self.assertIn("scaffold only", agents)
             self.assertIn("只分析", agents)
 
+    def test_generated_docs_include_release_publication_checklist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "release-project"
+            result = self.run_scaffold(root)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            workflow = (root / "开发者AI开发与PR提交流程.md").read_text(encoding="utf-8")
+            dev_rules = (root / "项目开发规范（AI协作）.md").read_text(encoding="utf-8")
+            agents = (root / "AGENTS.md").read_text(encoding="utf-8")
+
+            for expected in [
+                "发布工作不是只 push main",
+                "VERSION",
+                "CHANGELOG.md",
+                "GitHub Release",
+                "中文更新日志",
+                "Latest",
+                "GitHub Release URL",
+                "中文 Release notes",
+                "对比链接",
+                "真实变更、修复、验证和已知风险",
+                "规则沉淀或踩坑复盘",
+                "$repo = gh repo view --json nameWithOwner --jq .nameWithOwner",
+                '$tag = "v$(Get-Content VERSION)"',
+                "gh api repos/$repo/releases/latest --jq .tag_name",
+                "未获明确授权时",
+                "本地 HEAD、远端分支和 tag 指向的提交必须一致",
+            ]:
+                self.assertIn(expected, workflow)
+            self.assertIn("发布 / Release", dev_rules)
+            self.assertIn("### 0.6 开发方案与开发清单", dev_rules)
+            self.assertIn("### 0.7 阶段化开发硬要求", dev_rules)
+            self.assertIn("中文更新日志、对比链接和验证证据", dev_rules)
+            self.assertIn("GitHub Release URL", dev_rules)
+            self.assertIn("发布 / release / version / latest / tag", agents)
+            self.assertIn("开发者AI开发与PR提交流程.md", agents)
+            self.assertIn("发布工作不是只 push main", agents)
+
     def test_scaffold_creates_all_files_with_lf_line_endings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "lf-project"

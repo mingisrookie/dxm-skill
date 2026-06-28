@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.0 - 2026-06-28
+
+### Changed
+
+- 基于最近真实开发和发布踩坑蒸馏 DXM 规则：发布工作不再只看代码是否推到 `main`，必须同步版本号、`CHANGELOG.md`、tag、GitHub Release、Latest 状态、中文更新日志、对比链接和验证证据。
+- 生成的 `开发者AI开发与PR提交流程.md` 增加发布 / Release 工作流，明确 GitHub Release notes 默认使用中文。
+- 生成的 `项目开发规范（AI协作）.md` 增加发布完成面自检，避免遗漏公开发布表面。
+
+### Verified
+
+- `python -m unittest discover -s tests -v`
+- `python skills/dxm/scripts/scaffold_dxm.py --self-test`
+- `git diff --check`
+
 ## v0.3.2 - 2026-06-28
 
 ### Added

@@ -507,6 +507,17 @@ def run_self_test() -> None:
             if expected not in agents:
                 raise AssertionError(f"AGENTS.md missing {expected} routing")
 
+        workflow = (root / "开发者AI开发与PR提交流程.md").read_text(encoding="utf-8")
+        dev_rules = (root / "项目开发规范（AI协作）.md").read_text(encoding="utf-8")
+        if "发布 / release / version / latest / tag" not in agents or "开发者AI开发与PR提交流程.md" not in agents:
+            raise AssertionError("AGENTS.md missing release routing")
+        if "发布 / Release" not in dev_rules or "中文更新日志、对比链接和验证证据" not in dev_rules:
+            raise AssertionError("dev rules missing release completion surface")
+
+        for expected in ["发布工作不是只 push main", "VERSION", "CHANGELOG.md", "GitHub Release", "中文更新日志", "Latest", "$repo = gh repo view --json nameWithOwner --jq .nameWithOwner", "$tag = \"v$(Get-Content VERSION)\"", "gh api repos/$repo/releases/latest --jq .tag_name", "未获明确授权时", "本地 HEAD、远端分支和 tag 指向的提交必须一致", "GitHub Release URL", "中文 Release notes", "对比链接", "真实变更、修复、验证和已知风险"]:
+            if expected not in workflow:
+                raise AssertionError(f"release workflow missing {expected}")
+
         dry_root = Path(tmp) / "dry-run-project"
         dry_results = scaffold(dry_root, force=False, dry_run=True, refresh_blocks=False, trellis=False, inventory_depth=1)
         if dry_root.exists():

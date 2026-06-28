@@ -56,3 +56,7 @@ When rules conflict, prefer:
 4. current config and startup path;
 5. maintained root docs;
 6. old plans, comments, and generated artifacts.
+
+## Release discipline
+
+Real DXM use showed that pushing `main` is not enough for release work. A release is complete only when version metadata, `CHANGELOG.md`, tag, GitHub Release, Latest status, Chinese release notes, compare link, and verification evidence are all synchronized and checked on the live GitHub surface.
