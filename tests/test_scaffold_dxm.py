@@ -101,6 +101,8 @@ class ScaffoldDxmTests(unittest.TestCase):
             self.assertIn("grilling", agents)
             self.assertIn("domain-modeling", agents)
             self.assertIn("grill-me", agents)  # legacy alias remains documented
+            self.assertIn("第一性原理", agents)
+            self.assertIn("质疑隐藏假设", agents)
             self.assertIn("scaffold only", agents)
             self.assertIn("只分析", agents)
 
@@ -137,6 +139,8 @@ class ScaffoldDxmTests(unittest.TestCase):
             self.assertIn("### 0.6 开发方案与开发清单", dev_rules)
             self.assertIn("### 0.7 阶段化开发硬要求", dev_rules)
             self.assertIn("中文更新日志、对比链接和验证证据", dev_rules)
+            self.assertIn("第一性原理", dev_rules)
+            self.assertIn("对抗性检查", dev_rules)
             self.assertIn("GitHub Release URL", dev_rules)
             self.assertIn("发布 / release / version / latest / tag", agents)
             self.assertIn("开发者AI开发与PR提交流程.md", agents)
@@ -314,10 +318,13 @@ class ScaffoldDxmTests(unittest.TestCase):
             trellis_start = (root / ".agents" / "skills" / "trellis-start" / "SKILL.md").read_text(encoding="utf-8")
             self.assertIn("DXM Step 0", trellis_start)
             self.assertIn("AGENTS.md", trellis_start)
+            self.assertIn("第一性原理", trellis_start)
+            self.assertIn("对抗性检查", trellis_start)
 
             workflow = (root / ".trellis" / "workflow.md").read_text(encoding="utf-8")
             self.assertIn("DXM no-task routing", workflow)
             self.assertIn("小修", workflow)
+            self.assertIn("对抗性检查", workflow)
 
     def test_trellis_missing_command_still_scaffolds_normal_dxm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

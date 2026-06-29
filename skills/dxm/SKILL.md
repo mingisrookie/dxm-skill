@@ -9,7 +9,7 @@ description: Use when the user types "/dxm", asks to generate or refresh 大项�
 
 DXM turns a project folder into a governed AI collaboration workspace. It creates or refreshes the standard project rule files, then requires future analysis, development, testing, documentation, Git, PR, and handoff work in that folder to follow those local rules.
 
-DXM is also the entry point for project clarification: first `/dxm` should normally ask enough questions to make the project understandable before the docs become the long-term source of truth.
+DXM is also the entry point for project clarification: first `/dxm` should normally ask enough questions to make the project understandable before the docs become the long-term source of truth. Every requirements-question turn must explicitly prompt the agent to reason from first principles（第一性原理）before asking the user.
 
 ## Trigger contract
 
@@ -20,7 +20,7 @@ When the user says `/dxm`:
 1. Treat the current working directory as the target project root unless the user gives another path. Do not run this in a broad drive root like `G:\` unless the user explicitly says that is the project root.
 2. If the user says `只分析`, `先看看`, or equivalent read-only language, do not scaffold or edit files. Inspect only and report what DXM would do.
 3. If the user says `scaffold only`, `只生成模板`, or `先别问`, run the scaffold directly and do not grill.
-4. Otherwise classify the target before scaffolding. `new-project-grill` and `lightweight-grill` are DXM mode labels, not required standalone skill names; execute them with the current grill skills (`grilling`, `grill-with-docs`, `domain-modeling`), the legacy `grill-me` alias, or concise inline questions as appropriate:
+4. Otherwise classify the target before scaffolding. Before any requirements questions or any call to `grilling` / `grill-with-docs` / `grill-me`, state the first-principles frame: what outcome is truly needed, what constraints are real, what can be inferred locally, and what is still blocking. The grill prompt must also challenge assumptions instead of merely collecting answers. `new-project-grill` and `lightweight-grill` are DXM mode labels, not required standalone skill names; execute them with the current grill skills (`grilling`, `grill-with-docs`, `domain-modeling`), the legacy `grill-me` alias, or concise inline questions as appropriate:
    - Empty folder / new project: use `new-project-grill` via `grilling` or the legacy `grill-me` alias.
    - Existing code or docs: run `grill-with-docs`, which routes the interview through `grilling` plus `domain-modeling`.
    - Temporary script / demo: run `lightweight-grill` with only blocking questions, using inline questions or `grilling` when useful.
@@ -69,6 +69,7 @@ python "$skill\scripts\scaffold_dxm.py" --root "<project-root>" --trellis --trel
    - `session_auto_commit: false` in `.trellis/config.yaml`.
    - `trellis-start` Step 0 reads `AGENTS.md` and the DXM long-term docs first.
    - Trellis no-task workflow allows DXM inline work for small fixes and read-only analysis.
+   - Every Trellis task completion must run an adversarial check（对抗性检查）before finish/handoff.
    - Trellis must not stage, commit, push, create PRs, or merge without explicit user authorization.
 6. After scaffolding, read `AGENTS.md`; if `.trellis/` exists, also treat Trellis task files as part of the project workflow.
 
@@ -85,6 +86,8 @@ Use these labels consistently so future sessions route the same way:
 `new-project-grill` and `lightweight-grill` are routing labels. If no same-name skill exists, use `grilling` or direct inline questions; `grill-me` remains only a legacy alias. If existing docs/code are available, prefer `grill-with-docs`; when domain terms or ADRs change, also use `domain-modeling`.
 
 Default principle: first `/dxm` is a project setup conversation. Skip grill only for explicit scaffold-only/read-only intent, existing complete DXM, or wrong target directory.
+
+Requirements-question rule: every project-grill / `grilling` / `grill-with-docs` / `grill-me` / `new-project-grill` / inline requirements question must begin from first principles（第一性原理）and adversarial questioning（质疑）. The agent should first collapse the problem to the real user outcome, irreversible constraints, observable evidence, and unknown blockers, actively challenge hidden assumptions, over-scoped solutions, fake constraints, and user-suggested implementation bias, then ask only the smallest set of questions that changes the next action.
 
 ## Trellis routing policy
 
@@ -108,6 +111,8 @@ Suggested wording for small tasks:
 
 > 我按小修 inline 处理，不建 Trellis task。
 
+Trellis completion rule: after every Trellis task reaches check/finish or the agent believes the Trellis work is done, run an adversarial check before marking it complete. Challenge the result against requirements, hidden assumptions, negative paths, architecture boundaries, tests, docs, secrets, encoding, rollback/recovery, and user intent. Any blocking finding sends the task back into implement/check; do not finish on an unchecked result.
+
 ## Standard behavior inside a DXM workspace
 
 Before any non-trivial code, test, script, config, documentation, Git, PR, or release work:
@@ -123,13 +128,14 @@ Before any non-trivial code, test, script, config, documentation, Git, PR, or re
 ## DXM operating rules
 
 - Separate user intent: `只分析/先看看` means read-only; `开始开发/直接改/提交` means execute to verified completion.
+- For any requirements inquiry or grill call, explicitly start from first principles before asking: real outcome, real constraints, local evidence, unknown blockers, adversarial challenge to assumptions, and minimal next question.
 - Use evidence, not memory: inspect files, configs, commands, diffs, tests, listeners, logs, and runtime output.
-- Phase work: plan the affected chain, change one stage at a time, verify each stage, then run a final global review.
+- Phase work: plan the affected chain, change one stage at a time, verify each stage, then run a final global review and, for Trellis work, an adversarial completion check.
 - Preserve architecture boundaries: do not pile new logic into a main file when an existing module, provider, service, route, manager, or helper layer owns it.
 - Keep code and docs synchronized: file-structure changes update `项目文件结构说明.md`; runtime-flow changes update `项目完整链路说明.md`; process/boundary changes update `项目开发规范（AI协作）.md`.
 - Treat Chinese encoding as a completion blocker. Check modified Chinese docs, logs, comments, and UI strings for visible mojibake or replacement characters.
 - Protect secrets and runtime data. Never paste real tokens, passwords, API keys, account lists, or credential-bearing state into reports.
-- Final replies must say what changed, what was verified, which docs were synchronized, and what risks or skipped checks remain. For release work, also report `VERSION`, `CHANGELOG.md`, tag, GitHub Release, Latest status, Chinese release notes, and compare link evidence.
+- Final replies must say what changed, what was verified, which docs were synchronized, whether the Trellis adversarial check passed when applicable, and what risks or skipped checks remain. For release work, also report `VERSION`, `CHANGELOG.md`, tag, GitHub Release, Latest status, Chinese release notes, and compare link evidence.
 
 ## Scaffold script notes
 

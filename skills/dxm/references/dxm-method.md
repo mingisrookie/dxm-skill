@@ -6,12 +6,14 @@ DXM is a reusable large-project AI collaboration method distilled from a hand-ma
 
 1. AI development is a controlled workflow, not a one-shot code generation event.
 2. First `/dxm` is a project setup conversation: clarify the project before turning templates into long-term truth.
-3. Project facts must be discoverable from local files and runtime evidence, not memory.
-4. Architecture invariants should be written down so AI does not slowly erode them.
-5. Development must be staged: analyze, plan, implement, verify, document, then report.
-6. Documentation synchronization is part of completion, not optional cleanup.
-7. Encoding quality matters in Chinese projects; mojibake is a blocking defect.
-8. Final handoff must reveal verification and remaining risk instead of hiding behind “done”.
+3. Requirements questions start from first principles（第一性原理）: real outcome, hard constraints, local evidence, and remaining blockers come before asking the user.
+4. Project facts must be discoverable from local files and runtime evidence, not memory.
+5. Architecture invariants should be written down so AI does not slowly erode them.
+6. Development must be staged: analyze, plan, implement, verify, document, then report.
+7. Trellis task completion includes an adversarial check（对抗性检查）before finish or handoff.
+8. Documentation synchronization is part of completion, not optional cleanup.
+9. Encoding quality matters in Chinese projects; mojibake is a blocking defect.
+10. Final handoff must reveal verification and remaining risk instead of hiding behind “done”.
 
 ## Project-grill routing
 
@@ -25,6 +27,8 @@ Use the lightest clarification mode that still makes the future project understa
 
 Skip grill only when the user explicitly asks for scaffold-only/read-only behavior, the folder already has complete DXM docs, or the current directory is not the project root.
 
+Before any requirements question, prompt the agent to reason from first principles: collapse the problem to the real outcome, hard constraints, local evidence, and unknown blockers, then ask only questions that change the next action.
+
 ## Trellis relationship
 
 DXM is the project rule layer. Grill is the clarification layer. Trellis is the medium/large task memory layer.
@@ -33,6 +37,7 @@ Default routing:
 
 - small read-only or one-file work: DXM inline;
 - unclear, multi-file, architectural, multi-stage, or long-lived work: project-grill, then Trellis task PRD;
+- after every Trellis task completion: adversarial check, then finish/handoff only if no blocking finding remains;
 - Trellis never overrides DXM Git authorization, read-only intent, or secret-handling rules.
 
 ## What stays project-specific

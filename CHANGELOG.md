@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.0.1 - 2026-06-29
+
+### Changed
+
+- DXM requirements clarification now explicitly starts from first principles（第一性原理）before asking the user.
+- Calls to `grilling`, `grill-with-docs`, and legacy `grill-me` now require adversarial questioning（质疑）of hidden assumptions, fake constraints, over-scoped solutions, and user-suggested implementation bias.
+- Trellis task completion now requires an adversarial check（对抗性检查）before finish or handoff; blocking findings return the task to implement/check.
+- Synced the installed skill guidance, generated project templates, Trellis managed blocks, and packaged self-test assertions.
+
+### Verified
+
+- `python -m unittest discover -s tests -v`
+- `python skills/dxm/scripts/scaffold_dxm.py --self-test`
+- `git diff --check`
+
 ## v1.0.0 - 2026-06-28
 
 ### Changed
