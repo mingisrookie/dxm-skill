@@ -326,6 +326,29 @@ class ScaffoldDxmTests(unittest.TestCase):
             self.assertIn("小修", workflow)
             self.assertIn("对抗性检查", workflow)
 
+    def test_trellis_commented_session_auto_commit_is_uncommented_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "trellis-commented-config"
+            first = self.run_scaffold(root)
+            self.assertEqual(first.returncode, 0, first.stderr)
+
+            (root / ".trellis").mkdir()
+            (root / ".trellis" / "config.yaml").write_text("# session_auto_commit: true\nother: 1\n", encoding="utf-8")
+            (root / ".trellis" / "workflow.md").write_text("# Workflow\n", encoding="utf-8")
+            (root / ".agents" / "skills" / "trellis-start").mkdir(parents=True)
+            (root / ".agents" / "skills" / "trellis-start" / "SKILL.md").write_text("# trellis-start\n", encoding="utf-8")
+
+            env = os.environ.copy()
+            env["PATH"] = ""
+            result = self.run_scaffold(root, "--trellis", env=env)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            config = (root / ".trellis" / "config.yaml").read_text(encoding="utf-8")
+            self.assertIn("session_auto_commit: false", config)
+            self.assertNotIn("# session_auto_commit: true", config)
+            self.assertEqual(config.count("session_auto_commit"), 1)
+            self.assertIn("other: 1", config)
+
     def test_trellis_missing_command_still_scaffolds_normal_dxm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "no-trellis"

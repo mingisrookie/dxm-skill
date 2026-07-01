@@ -549,6 +549,23 @@ def run_self_test() -> None:
         if not all(status == "would-create" for _, status in dry_results):
             raise AssertionError("--dry-run did not report would-create for a new project")
 
+        # session_auto_commit override must be idempotent on Trellis's commented default
+        cfg_root = Path(tmp) / "trellis-config"
+        cfg = cfg_root / ".trellis" / "config.yaml"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text("# session_auto_commit: true\nother: 1\n", encoding="utf-8")
+        first = ensure_session_auto_commit_disabled(cfg_root)
+        second = ensure_session_auto_commit_disabled(cfg_root)
+        if first != "updated":
+            raise AssertionError(f"session_auto_commit first pass expected updated, got {first}")
+        if second != "skipped-existing":
+            raise AssertionError(f"session_auto_commit not idempotent: second pass got {second}")
+        cfg_text = cfg.read_text(encoding="utf-8")
+        if "session_auto_commit: false" not in cfg_text:
+            raise AssertionError("session_auto_commit was not disabled")
+        if cfg_text.count("session_auto_commit") != 1:
+            raise AssertionError(f"session_auto_commit duplicated: {cfg_text!r}")
+
 
 def kill_process_tree(process: subprocess.Popen[str]) -> None:
     if process.poll() is not None:
@@ -627,9 +644,19 @@ def ensure_session_auto_commit_disabled(root: Path, dry_run: bool = False) -> st
         return "missing-config"
 
     existing = read_existing_text(config)
-    updated, count = re.subn(r"(?m)^\s*session_auto_commit\s*:\s*.*$", "session_auto_commit: false", existing)
-    if count == 0:
-        updated = existing.rstrip() + "\n\nsession_auto_commit: false\n"
+    desired = "session_auto_commit: false"
+    # Horizontal-whitespace-only anchors: \s would match newlines in (?m) mode and
+    # swallow a preceding blank line, breaking idempotency on repeated runs.
+    active_re = re.compile(r"(?m)^[^\S\n]*session_auto_commit[^\S\n]*:[^\S\n]*.*$")
+    commented_re = re.compile(r"(?m)^[^\S\n]*#[^\S\n]*session_auto_commit[^\S\n]*:.*$")
+    if active_re.search(existing):
+        updated = active_re.sub(desired, existing)
+    elif commented_re.search(existing):
+        # Trellis ships the key commented out (`# session_auto_commit: true`);
+        # uncomment in place instead of appending a contradictory duplicate.
+        updated = commented_re.sub(desired, existing, count=1)
+    else:
+        updated = existing.rstrip("\n") + "\n\n" + desired + "\n"
     if updated != existing:
         if dry_run:
             return "would-update"
