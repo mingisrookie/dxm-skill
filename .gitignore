@@ -3,3 +3,36 @@ dist/
 __pycache__/
 .DS_Store
 Thumbs.db
+
+# Local/project-level AI skill installs; these are not dxm release artifacts.
+.agents/
+agent/
+
+# Guard against accidental HyperFrames/video skill installs in this repo.
+skills/animejs/
+skills/contribute-catalog/
+skills/css-animations/
+skills/embedded-captions/
+skills/faceless-explainer/
+skills/general-video/
+skills/graphic-overlays/
+skills/gsap/
+skills/hyperframes/
+skills/hyperframes-animation/
+skills/hyperframes-cli/
+skills/hyperframes-core/
+skills/hyperframes-creative/
+skills/hyperframes-media/
+skills/hyperframes-registry/
+skills/lottie/
+skills/motion-graphics/
+skills/pr-to-video/
+skills/product-launch-video/
+skills/remotion-to-hyperframes/
+skills/slideshow/
+skills/tailwind/
+skills/three/
+skills/typegpu/
+skills/waapi/
+skills/website-to-hyperframes/
+skills/website-to-video/
