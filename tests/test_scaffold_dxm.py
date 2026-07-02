@@ -86,6 +86,16 @@ class ScaffoldDxmTests(unittest.TestCase):
             check=False,
         )
 
+    def load_scaffold_module(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("scaffold_dxm", SCRIPT)
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        self.assertIsNotNone(spec.loader)
+        spec.loader.exec_module(module)
+        return module
+
     def test_generated_agents_includes_first_run_grill_routing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "new-product"
@@ -218,6 +228,7 @@ class ScaffoldDxmTests(unittest.TestCase):
             root.mkdir()
             sensitive = [".npmrc", ".pypirc", ".netrc", "service-account.json", "prod.secret.yaml", "app.keystore"]
             safe = [
+                "config.json",
                 "tokenizer.py",
                 "passwordless.md",
                 "secretary-notes.md",
@@ -238,6 +249,22 @@ class ScaffoldDxmTests(unittest.TestCase):
                 self.assertRegex(structure, rf"`{re.escape(name)}`：运行态或敏感数据")
             for name in safe:
                 self.assertRegex(structure, rf"`{re.escape(name)}`：项目文件")
+
+    def test_inventory_skips_common_tooling_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "tooling-dirs-project"
+            for name in [".venv", "venv", ".idea", ".vscode", ".pytest_cache", ".tox"]:
+                nested = root / name / "nested"
+                nested.mkdir(parents=True)
+                (nested / "noise.txt").write_text("placeholder\n", encoding="utf-8")
+
+            result = self.run_scaffold(root, "--inventory-depth", "2")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            structure = (root / "项目文件结构说明.md").read_text(encoding="utf-8")
+            for name in [".venv", "venv", ".idea", ".vscode", ".pytest_cache", ".tox"]:
+                self.assertRegex(structure, rf"`{re.escape(name)}/`：依赖、构建或工具目录")
+                self.assertNotRegex(structure, rf"`{re.escape(name)}/nested/`")
 
     def test_existing_start_marker_without_end_marker_fails_loudly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -407,6 +434,21 @@ class ScaffoldDxmTests(unittest.TestCase):
             self.assertIn("would-update: .trellis/config.yaml session_auto_commit", result.stdout)
             self.assertIn("would-append-trellis-block: .trellis/workflow.md DXM no-task routing", result.stdout)
 
+    def test_dry_run_trellis_reports_post_init_safety_plan_for_fresh_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "dry-run-trellis-fresh"
+
+            result = self.run_scaffold(root, "--trellis", "--dry-run")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(root.exists())
+            self.assertIn("would-run: trellis init --codex", result.stdout)
+            self.assertIn("would-apply-after-trellis-init: AGENTS.md", result.stdout)
+            self.assertIn("would-apply-after-trellis-init: 项目开发规范（AI协作）.md", result.stdout)
+            self.assertIn("would-apply-after-trellis-init: .trellis/config.yaml session_auto_commit", result.stdout)
+            self.assertIn("would-apply-after-trellis-init: .agents/skills/trellis-start/SKILL.md DXM Step 0", result.stdout)
+            self.assertIn("would-apply-after-trellis-init: .trellis/workflow.md DXM no-task routing", result.stdout)
+
     def test_refresh_blocks_updates_existing_trellis_blocks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "refresh-trellis"
@@ -522,14 +564,29 @@ class ScaffoldDxmTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("DXM self-test OK", result.stdout)
 
-    def test_broad_root_guard_requires_explicit_override(self) -> None:
-        import importlib.util
+    def test_self_test_is_installation_smoke_not_template_content_lock(self) -> None:
+        module = self.load_scaffold_module()
 
-        spec = importlib.util.spec_from_file_location("scaffold_dxm", SCRIPT)
-        self.assertIsNotNone(spec)
-        module = importlib.util.module_from_spec(spec)
-        self.assertIsNotNone(spec.loader)
-        spec.loader.exec_module(module)
+        def minimal_template(name: str) -> str:
+            if name == "AGENTS.md":
+                return "<!-- DXM-RULES:START -->\nminimal agents\n<!-- DXM-RULES:END -->\n"
+            return "<!-- DXM-DOC-RULES:START -->\nminimal doc\n<!-- DXM-DOC-RULES:END -->\n"
+
+        marker_only_blocks = {
+            "TRELLIS_AGENTS_BLOCK": "<!-- DXM-TRELLIS:START -->\nminimal\n<!-- DXM-TRELLIS:END -->\n",
+            "TRELLIS_DEV_RULES_BLOCK": "<!-- DXM-TRELLIS:START -->\nminimal\n<!-- DXM-TRELLIS:END -->\n",
+            "TRELLIS_CHAIN_BLOCK": "<!-- DXM-TRELLIS:START -->\nminimal\n<!-- DXM-TRELLIS:END -->\n",
+            "TRELLIS_START_STEP0_BLOCK": "<!-- DXM-TRELLIS-START-STEP0:START -->\nminimal\n<!-- DXM-TRELLIS-START-STEP0:END -->\n",
+            "TRELLIS_WORKFLOW_OVERRIDE_BLOCK": "<!-- DXM-TRELLIS-WORKFLOW-OVERRIDE:START -->\nminimal\n<!-- DXM-TRELLIS-WORKFLOW-OVERRIDE:END -->\n",
+        }
+        module.read_template = minimal_template
+        for name, value in marker_only_blocks.items():
+            setattr(module, name, value)
+
+        module.run_self_test()
+
+    def test_broad_root_guard_requires_explicit_override(self) -> None:
+        module = self.load_scaffold_module()
 
         broad_root = Path(Path.cwd().anchor)
         self.assertTrue(module.is_broad_root(broad_root))

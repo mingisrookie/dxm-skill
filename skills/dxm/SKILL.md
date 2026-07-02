@@ -29,14 +29,12 @@ When the user says `/dxm`:
    - vendor / dependency / build output: only initialize if the user says this is the thing they maintain or study.
 5. Run the bundled scaffold script after the project intent is clear. Resolve `scripts/scaffold_dxm.py` relative to this skill directory. In a standard Codex install this is usually `%USERPROFILE%\.codex\skills\dxm\scripts\scaffold_dxm.py`; in a repo checkout use `skills/dxm/scripts/scaffold_dxm.py` relative to the checkout root.
 
-```powershell
+```text
+# Installed skill on Windows PowerShell:
 $skill = Join-Path $env:USERPROFILE ".codex\skills\dxm"
 python "$skill\scripts\scaffold_dxm.py" --root "<project-root>"
-```
 
-Cross-platform checkout form:
-
-```bash
+# Repository checkout on any shell:
 python skills/dxm/scripts/scaffold_dxm.py --root "<project-root>"
 ```
 
@@ -58,9 +56,13 @@ When the user says `/dxm trellis`, `/dxm 大开发`, `/dxm full`, or otherwise a
 1. First satisfy normal `/dxm` behavior and project-grill expectations.
 2. Run the bundled scaffold script with Trellis enabled:
 
-```powershell
+```text
+# Installed skill on Windows PowerShell:
 $skill = Join-Path $env:USERPROFILE ".codex\skills\dxm"
 python "$skill\scripts\scaffold_dxm.py" --root "<project-root>" --trellis --trellis-user "<developer-name>"
+
+# Repository checkout on any shell:
+python skills/dxm/scripts/scaffold_dxm.py --root "<project-root>" --trellis --trellis-user "<developer-name>"
 ```
 
 3. This must remain non-destructive: DXM docs are created when missing, existing hand-maintained docs are preserved, DXM/Trellis marker blocks are appended once or refreshed only inside managed markers, incomplete marker pairs fail loudly, and Trellis is initialized non-interactively with `trellis init --codex -y --skip-existing`.

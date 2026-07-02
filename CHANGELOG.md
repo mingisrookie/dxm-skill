@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.2 - 2026-07-02
+
+### Added
+
+- Added GitHub Actions CI on Ubuntu and Windows for unit tests plus packaged `--self-test`.
+- Added dry-run reporting for Trellis post-init DXM safety actions on fresh projects.
+
+### Changed
+
+- Reduced `--self-test` to installation/smoke coverage so content assertions live in `tests/`.
+- Expanded inventory skip directories for common virtualenv, IDE, pytest, tox, mypy, and ruff folders.
+- Stopped treating plain `config.json` as sensitive by filename alone; explicit credential/secret/service-account patterns still remain protected.
+- Reduced README version duplication and documented `__pycache__/` cleanup for manual skill copies.
+
 ## v1.0.1 - 2026-06-29
 
 ### Changed

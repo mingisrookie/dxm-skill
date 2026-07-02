@@ -34,7 +34,24 @@ TRELLIS_WORKFLOW_OVERRIDE_END = "<!-- DXM-TRELLIS-WORKFLOW-OVERRIDE:END -->"
 DXM_DOC_BLOCK_START = "<!-- DXM-DOC-RULES:START -->"
 DXM_DOC_BLOCK_END = "<!-- DXM-DOC-RULES:END -->"
 
-SKIP_DIRS = {".git", "node_modules", "dist", "build", "coverage", ".next", "target", "__pycache__"}
+SKIP_DIRS = {
+    ".git",
+    ".idea",
+    ".mypy_cache",
+    ".next",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "target",
+    "venv",
+}
 SENSITIVE_NAMES = {
     ".env",
     ".env.local",
@@ -42,7 +59,6 @@ SENSITIVE_NAMES = {
     ".npmrc",
     ".pypirc",
     "accounts.json",
-    "config.json",
     "credentials.json",
     "id_dsa",
     "id_ecdsa",
@@ -508,39 +524,9 @@ def run_self_test() -> None:
             if statuses.get(filename) not in {"created", "appended-dxm-block"}:
                 raise AssertionError(f"{filename} unexpected status: {statuses.get(filename)}")
 
-        agents = (root / "AGENTS.md").read_text(encoding="utf-8")
-        for expected in ["project-grill", "grilling", "grill-with-docs", "domain-modeling", "grill-me"]:
-            if expected not in agents:
-                raise AssertionError(f"AGENTS.md missing {expected} routing")
-        for expected in ["第一性原理", "对抗性检查"]:
-            if expected not in agents:
-                raise AssertionError(f"AGENTS.md missing {expected} DXM guard")
-
-        workflow = (root / "开发者AI开发与PR提交流程.md").read_text(encoding="utf-8")
-        dev_rules = (root / "项目开发规范（AI协作）.md").read_text(encoding="utf-8")
-        if "发布 / release / version / latest / tag" not in agents or "开发者AI开发与PR提交流程.md" not in agents:
-            raise AssertionError("AGENTS.md missing release routing")
-        if "发布 / Release" not in dev_rules or "中文更新日志、对比链接和验证证据" not in dev_rules:
-            raise AssertionError("dev rules missing release completion surface")
-        for expected in ["第一性原理", "对抗性检查"]:
-            if expected not in dev_rules:
-                raise AssertionError(f"dev rules missing {expected} DXM guard")
-
-        trellis_guard_blocks = {
-            "TRELLIS_AGENTS_BLOCK": TRELLIS_AGENTS_BLOCK,
-            "TRELLIS_DEV_RULES_BLOCK": TRELLIS_DEV_RULES_BLOCK,
-            "TRELLIS_CHAIN_BLOCK": TRELLIS_CHAIN_BLOCK,
-            "TRELLIS_START_STEP0_BLOCK": TRELLIS_START_STEP0_BLOCK,
-            "TRELLIS_WORKFLOW_OVERRIDE_BLOCK": TRELLIS_WORKFLOW_OVERRIDE_BLOCK,
-        }
-        for block_name, block in trellis_guard_blocks.items():
-            for expected in ["第一性原理", "对抗性检查"]:
-                if expected not in block:
-                    raise AssertionError(f"{block_name} missing {expected} guard")
-
-        for expected in ["发布工作不是只 push main", "VERSION", "CHANGELOG.md", "GitHub Release", "中文更新日志", "Latest", "$repo = gh repo view --json nameWithOwner --jq .nameWithOwner", "$tag = \"v$(Get-Content VERSION)\"", "gh api repos/$repo/releases/latest --jq .tag_name", "未获明确授权时", "本地 HEAD、远端分支和 tag 指向的提交必须一致", "GitHub Release URL", "中文 Release notes", "对比链接", "真实变更、修复、验证和已知风险"]:
-            if expected not in workflow:
-                raise AssertionError(f"release workflow missing {expected}")
+        for filename in FILES:
+            path = root / filename
+            check_managed_blocks(path, path.read_text(encoding="utf-8"), scaffold_marker_pairs(filename))
 
         dry_root = Path(tmp) / "dry-run-project"
         dry_results = scaffold(dry_root, force=False, dry_run=True, refresh_blocks=False, trellis=False, inventory_depth=1)
@@ -548,23 +534,6 @@ def run_self_test() -> None:
             raise AssertionError("--dry-run created the target root")
         if not all(status == "would-create" for _, status in dry_results):
             raise AssertionError("--dry-run did not report would-create for a new project")
-
-        # session_auto_commit override must be idempotent on Trellis's commented default
-        cfg_root = Path(tmp) / "trellis-config"
-        cfg = cfg_root / ".trellis" / "config.yaml"
-        cfg.parent.mkdir(parents=True)
-        cfg.write_text("# session_auto_commit: true\nother: 1\n", encoding="utf-8")
-        first = ensure_session_auto_commit_disabled(cfg_root)
-        second = ensure_session_auto_commit_disabled(cfg_root)
-        if first != "updated":
-            raise AssertionError(f"session_auto_commit first pass expected updated, got {first}")
-        if second != "skipped-existing":
-            raise AssertionError(f"session_auto_commit not idempotent: second pass got {second}")
-        cfg_text = cfg.read_text(encoding="utf-8")
-        if "session_auto_commit: false" not in cfg_text:
-            raise AssertionError("session_auto_commit was not disabled")
-        if cfg_text.count("session_auto_commit") != 1:
-            raise AssertionError(f"session_auto_commit duplicated: {cfg_text!r}")
 
 
 def kill_process_tree(process: subprocess.Popen[str]) -> None:
@@ -717,6 +686,18 @@ def ensure_trellis_safety_overrides(root: Path, dry_run: bool = False, refresh_b
     ]
 
 
+def planned_trellis_post_init_actions() -> list[tuple[str, str]]:
+    return [
+        ("AGENTS.md", "would-apply-after-trellis-init"),
+        ("项目开发规范（AI协作）.md", "would-apply-after-trellis-init"),
+        ("项目文件结构说明.md", "would-apply-after-trellis-init"),
+        ("项目完整链路说明.md", "would-apply-after-trellis-init"),
+        (".trellis/config.yaml session_auto_commit", "would-apply-after-trellis-init"),
+        (".agents/skills/trellis-start/SKILL.md DXM Step 0", "would-apply-after-trellis-init"),
+        (".trellis/workflow.md DXM no-task routing", "would-apply-after-trellis-init"),
+    ]
+
+
 def validate_trellis_update_inputs(root: Path) -> None:
     if not root.exists():
         return
@@ -809,6 +790,17 @@ def print_trellis_notes(trellis_output: str) -> None:
             print(f"  {line}")
 
 
+def print_safe_update_error(exc: ExistingFileEncodingError | BrokenManagedBlockError) -> None:
+    if isinstance(exc, ExistingFileEncodingError):
+        print(f"Error: {exc.path} is not valid UTF-8; convert it to UTF-8 before DXM can safely update it.", file=sys.stderr)
+        return
+    print(
+        f"Error: {exc.path} has incomplete managed block {exc.start_marker}; "
+        f"restore the matching {exc.end_marker} before DXM can safely update it.",
+        file=sys.stderr,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Scaffold DXM AI collaboration files")
     parser.add_argument("--root", default=os.getcwd(), help="target project root; defaults to current directory")
@@ -847,15 +839,8 @@ def main() -> int:
         if args.trellis and not args.dry_run:
             validate_trellis_update_inputs(root)
         results = scaffold(root, args.force, args.dry_run, args.refresh_blocks, args.trellis, args.inventory_depth)
-    except ExistingFileEncodingError as exc:
-        print(f"Error: {exc.path} is not valid UTF-8; convert it to UTF-8 before DXM can safely update it.", file=sys.stderr)
-        return 2
-    except BrokenManagedBlockError as exc:
-        print(
-            f"Error: {exc.path} has incomplete managed block {exc.start_marker}; "
-            f"restore the matching {exc.end_marker} before DXM can safely update it.",
-            file=sys.stderr,
-        )
+    except (ExistingFileEncodingError, BrokenManagedBlockError) as exc:
+        print_safe_update_error(exc)
         return 2
     except UnsafeProjectRootError as exc:
         print(f"Error: {exc.root} is too broad for DXM scaffold; choose a project root or pass --allow-broad-root explicitly.", file=sys.stderr)
@@ -872,30 +857,18 @@ def main() -> int:
             try:
                 results.extend(ensure_trellis_docs(root, dry_run=True, refresh_blocks=args.refresh_blocks))
                 results.extend(ensure_trellis_safety_overrides(root, dry_run=True, refresh_blocks=args.refresh_blocks))
-            except ExistingFileEncodingError as exc:
-                print(f"Error: {exc.path} is not valid UTF-8; convert it to UTF-8 before DXM can safely update it.", file=sys.stderr)
+            except (ExistingFileEncodingError, BrokenManagedBlockError) as exc:
+                print_safe_update_error(exc)
                 return 2
-            except BrokenManagedBlockError as exc:
-                print(
-                    f"Error: {exc.path} has incomplete managed block {exc.start_marker}; "
-                    f"restore the matching {exc.end_marker} before DXM can safely update it.",
-                    file=sys.stderr,
-                )
-                return 2
+        elif args.dry_run:
+            results.extend(planned_trellis_post_init_actions())
         if not args.dry_run and (root / ".trellis").exists():
             try:
                 validate_trellis_update_inputs(root)
                 results.extend(ensure_trellis_docs(root, refresh_blocks=args.refresh_blocks))
                 results.extend(ensure_trellis_safety_overrides(root, refresh_blocks=args.refresh_blocks))
-            except ExistingFileEncodingError as exc:
-                print(f"Error: {exc.path} is not valid UTF-8; convert it to UTF-8 before DXM can safely update it.", file=sys.stderr)
-                return 2
-            except BrokenManagedBlockError as exc:
-                print(
-                    f"Error: {exc.path} has incomplete managed block {exc.start_marker}; "
-                    f"restore the matching {exc.end_marker} before DXM can safely update it.",
-                    file=sys.stderr,
-                )
+            except (ExistingFileEncodingError, BrokenManagedBlockError) as exc:
+                print_safe_update_error(exc)
                 return 2
 
     print(f"DXM scaffold root: {root}")
