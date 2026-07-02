@@ -15,6 +15,16 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+
+def configure_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+configure_stdio()
+
+
 FILES = [
     "AGENTS.md",
     "项目开发规范（AI协作）.md",

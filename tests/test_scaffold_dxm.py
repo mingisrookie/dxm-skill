@@ -192,6 +192,18 @@ class ScaffoldDxmTests(unittest.TestCase):
             self.assertIn("would-create: AGENTS.md", result.stdout)
             self.assertFalse(root.exists())
 
+    def test_cli_prints_unicode_filenames_with_legacy_stdio_encoding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "legacy-stdio-project"
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "cp1252"
+
+            result = self.run_scaffold(root, "--dry-run", env=env)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("would-create: 项目开发规范（AI协作）.md", result.stdout)
+            self.assertFalse(root.exists())
+
     def test_existing_non_utf8_file_fails_without_mutating_project(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "gbk-project"
