@@ -129,7 +129,7 @@ python skills/dxm/scripts/scaffold_dxm.py --self-test
 python skills/dxm/scripts/scaffold_dxm.py --root /path/to/project --allow-broad-root
 ```
 
-只有明确需要覆盖已有生成文件时才使用：
+只有明确需要覆盖已有 DXM 目标文件、且接受丢失人工内容风险时才使用：
 
 ```bash
 python skills/dxm/scripts/scaffold_dxm.py --root /path/to/project --force

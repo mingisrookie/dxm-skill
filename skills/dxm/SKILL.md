@@ -66,7 +66,7 @@ Triggers: `/dxm trellis`, `/dxm 大开发`, `/dxm full`, or any request to enabl
 | `--trellis-timeout-seconds N` | Max wait for `trellis init` (default 120) |
 | `--self-test` | Verify an installed skill package with packaged smoke checks |
 | `--allow-broad-root` | Only when the user explicitly confirms the target really is a drive, home, system, vendor, or build root |
-| `--force` | Overwrite generated files; only on explicit user request |
+| `--force` | Overwrite existing DXM target files; only when the user explicitly asks to replace them and accepts loss of manual content |
 
 ## Project-grill modes
 

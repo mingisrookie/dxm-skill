@@ -13,6 +13,7 @@ SKILL_MD = SKILL_DIR / "SKILL.md"
 TEMPLATE_DIR = SKILL_DIR / "assets" / "templates"
 AGENTS_TEMPLATE = TEMPLATE_DIR / "AGENTS.md.template"
 SCRIPT_PATH = SKILL_DIR / "scripts" / "scaffold_dxm.py"
+CHAIN_DOC = REPO_ROOT / "项目完整链路说明.md"
 
 sys.path.insert(0, str(SCRIPT_PATH.parent))
 import scaffold_dxm  # noqa: E402
@@ -31,6 +32,7 @@ class DocSyncTest(unittest.TestCase):
         cls.skill_text = SKILL_MD.read_text(encoding="utf-8")
         cls.agents_template_text = AGENTS_TEMPLATE.read_text(encoding="utf-8")
         cls.script_text = SCRIPT_PATH.read_text(encoding="utf-8")
+        cls.chain_doc_text = CHAIN_DOC.read_text(encoding="utf-8")
 
     def test_generated_filenames_listed_in_skill_and_agents_template(self) -> None:
         for name in scaffold_dxm.FILES:
@@ -54,6 +56,22 @@ class DocSyncTest(unittest.TestCase):
     def test_trellis_init_command_documented_and_implemented(self) -> None:
         self.assertIn(TRELLIS_INIT_DOC, self.skill_text, "SKILL.md no longer documents the exact trellis init command")
         self.assertIn(TRELLIS_INIT_IMPL, self.script_text, "scaffold_dxm.py changed the trellis init argv; update SKILL.md too")
+
+    def test_force_flag_warning_matches_actual_overwrite_scope(self) -> None:
+        self.assertIn("Overwrite existing DXM target files", self.skill_text)
+        self.assertNotIn("Overwrite generated files", self.skill_text)
+
+    def test_dogfood_chain_doc_describes_real_repo_pipeline(self) -> None:
+        for expected in [
+            "skills/dxm/SKILL.md",
+            "skills/dxm/scripts/scaffold_dxm.py",
+            "skills/dxm/assets/templates/",
+            "tests/test_scaffold_dxm.py",
+            "tests/test_doc_sync.py",
+            "python -m unittest discover -s tests -v",
+        ]:
+            self.assertIn(expected, self.chain_doc_text)
+        self.assertNotIn("首次 `/dxm` 生成后，应在这里写清楚", self.chain_doc_text)
 
 
 if __name__ == "__main__":
