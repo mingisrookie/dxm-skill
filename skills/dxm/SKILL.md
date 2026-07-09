@@ -18,8 +18,8 @@ Every requirements question — project-grill, `grilling`, `grill-with-docs`, le
 ### `/dxm`
 
 1. Treat the current working directory as the target project root unless the user gives another path. Do not run this in a broad drive root like `G:\` unless the user explicitly says that is the project root.
-2. If the user says `只分析`, `先看看`, or equivalent read-only language: inspect only and report what DXM would do. Do not scaffold or edit files.
-3. If the user says `scaffold only`, `只生成模板`, or `先别问`: run the scaffold directly and do not grill.
+2. If the user says `只分析`, `先看看`, or equivalent read-only language: inspect only and report what DXM would do. Do not scaffold or edit files, and stop here — none of the later items apply.
+3. If the user says `scaffold only`, `只生成模板`, or `先别问`: skip the grill routing in item 4 and continue from item 5.
 4. Otherwise classify the target before scaffolding and route it through the Project-grill modes table below, applying the first-principles rule before any question.
 5. Run the bundled scaffold script after the project intent is clear. Resolve `scripts/scaffold_dxm.py` relative to this skill's own directory (the skill loader reports the base path; typical installs are `%USERPROFILE%\.codex\skills\dxm` for Codex and `%USERPROFILE%\.claude\skills\dxm` for Claude Code; in a repo checkout use `skills/dxm/scripts/scaffold_dxm.py`):
 
