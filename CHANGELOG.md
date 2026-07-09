@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.0.3 - 2026-07-09
+
+### Added
+
+- Dogfooded DXM onto this repository with root `AGENTS.md` and the four long-term project documents.
+- Added `tests/test_doc_sync.py` as a tripwire for drift between `skills/dxm/SKILL.md`, generated templates, and `scaffold_dxm.py`.
+- Added regression checks that keep the `--force` warning aligned with its real overwrite scope and require this repository's chain document to describe the real DXM pipeline.
+
+### Changed
+
+- Restructured `skills/dxm/SKILL.md` so `/dxm` read-only and scaffold-only branches are explicit.
+- Documented the exact Trellis init command with `-u <developer>` and clarified `--trellis-user` defaults.
+- Clarified that `--force` overwrites existing DXM target files and must only be used when the user accepts possible manual-content loss.
+- Replaced placeholder dogfood chain documentation with the real repository flow: skill trigger, scaffold CLI, templates, Trellis mode, tests, and CI.
+- Updated README's latest-change summary and Trellis command wording for v1.0.3.
+
+### Verified
+
+- `python -m unittest discover -s tests -v`
+- `python skills/dxm/scripts/scaffold_dxm.py --self-test`
+- `git diff --check`
+
 ## v1.0.2 - 2026-07-02
 
 ### Added
