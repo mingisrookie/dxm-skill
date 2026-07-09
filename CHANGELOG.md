@@ -1,5 +1,20 @@
 # 更新日志
 
+## v1.0.4 - 2026-07-09
+
+### 修复
+
+- 将 `CHANGELOG.md` 全文统一为中文标题、中文小节和中文条目，保留必要的命令、路径、版本号和产品名。
+- 复查 README 最新更新摘要与使用说明，去掉 `inline`、`task`、`marker` 等不必要英文散落表达。
+- 更新 GitHub Release 说明为中文表述，并用 v1.0.4 作为包含文档修正的最新归档版本。
+
+### 验证
+
+- `python -m unittest discover -s tests -v`
+- `python skills/dxm/scripts/scaffold_dxm.py --self-test`
+- `git diff --check`
+- UTF-8 / LF / 中文乱码检查
+
 ## v1.0.3 - 2026-07-09
 
 ### 新增
