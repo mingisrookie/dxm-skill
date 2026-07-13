@@ -24,6 +24,7 @@
 - `scaffold-only` 明确输出 `NOT_EVALUATED`，不再把模板写入成功误报为项目 `READY`。
 - 加固孤立、重复、交叉、乱序、非规范或未闭合 marker，以及未闭合 Markdown fence 的识别，避免在损坏文档上继续追加。
 - 加固受管文件及祖先路径检查，拒绝越出 root、symlink、reparse point、多硬链接和非普通文件。
+- 修复 Windows runner 中 trusted root 与 receipt 词法路径因临时目录或父级别名不同而误判越界；校验现先沿词法 root 检查内部链接节点，再确认解析后的目标仍在规范 root 内。
 - Trellis 完成门只接受规范 `YYYY-MM` 归档目录，以及作为 `check.md` 文件首个非空、顶格独立行且全文唯一的 `<!-- DXM-CHECK:PASS -->`；其他或未闭合 marker-like 片段一律拒绝。
 - baseline 与 receipt 会规范化 credential-like 字段名并向嵌套容器传播检查；除显式环境变量引用和白名单脱敏占位外，凭据 literal 按安全字段路径拒绝且不回显敏感值。
 - 本地 `.dxm/project.json` 保留规范化绝对根目录；共享 Markdown 会先词法折叠 `.` / `..`，再使用 `$PROJECT_ROOT` / `$ABSOLUTE_PATH` 可移植投影，避免不同 clone 路径产生长期文档漂移。

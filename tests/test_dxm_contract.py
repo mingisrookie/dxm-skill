@@ -1540,6 +1540,34 @@ class ReceiptContractTests(unittest.TestCase):
             self.assertIn("archive", combined)
             self.assertEqual(correct_errors, [])
 
+            real_parent = root / "real-parent"
+            real_parent.mkdir()
+            root_alias = root / "root-alias"
+            create_directory_link_or_skip(real_parent, root_alias)
+            try:
+                aliased_root = root_alias / "project"
+                write_receipt_project(aliased_root, contract)
+                aliased_receipt = (
+                    aliased_root
+                    / ".trellis"
+                    / "tasks"
+                    / "archive"
+                    / "2026-07"
+                    / RECEIPT_TASK
+                    / "completion.json"
+                )
+                aliased_receipt.write_text(
+                    json.dumps(valid_receipt(aliased_root)),
+                    encoding="utf-8",
+                    newline="\n",
+                )
+
+                alias_errors = contract.validate_receipt(aliased_receipt, expected_root=aliased_root)
+
+                self.assertEqual(alias_errors, [])
+            finally:
+                remove_directory_link(root_alias)
+
     def test_receipt_rejects_finished_claim_while_trellis_task_is_still_active(self) -> None:
         contract = load_contract()
         with tempfile.TemporaryDirectory() as tmp:

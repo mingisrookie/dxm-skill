@@ -308,27 +308,29 @@ def _is_link_or_reparse(path: Path) -> bool:
 def _trusted_project_path_error(root: Path, path: Path, label: str) -> str | None:
     """Reject project artifacts that escape root or traverse link/reparse nodes."""
 
+    lexical_root = _lexical_absolute_path(root)
+    lexical_path = _lexical_absolute_path(path)
     canonical_root = _canonical_path(root)
     try:
-        relative = path.relative_to(canonical_root)
+        relative = lexical_path.relative_to(lexical_root)
     except ValueError:
         return f"{label} must stay inside the trusted project"
 
-    current = canonical_root
+    current = lexical_root
     for part in relative.parts:
         current /= part
         if _is_link_or_reparse(current):
             return f"{label} must stay inside the trusted project and not use symlink/reparse paths"
 
     try:
-        metadata = path.lstat()
+        metadata = lexical_path.lstat()
     except OSError:
         metadata = None
     if metadata is not None and stat.S_ISREG(metadata.st_mode) and metadata.st_nlink > 1:
         return f"{label} must stay inside the trusted project and not use hardlinked files"
 
     try:
-        resolved = path.resolve(strict=True)
+        resolved = lexical_path.resolve(strict=True)
         resolved.relative_to(canonical_root)
     except FileNotFoundError:
         return None
@@ -1381,12 +1383,13 @@ def validate_receipt(
         receipt_source = _lexical_absolute_path(data_or_path)
         if expected_root is not None:
             source_error = _trusted_project_path_error(
-                _canonical_path(expected_root),
+                Path(expected_root),
                 receipt_source,
                 "completion receipt",
             )
             if source_error is not None:
                 return [source_error]
+            receipt_source = _canonical_path(receipt_source)
     data, load_errors = _receipt_data(data_or_path)
     if load_errors:
         return load_errors
