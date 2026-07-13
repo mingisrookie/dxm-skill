@@ -1,4 +1,4 @@
-display_name: DXM 大项目开发规范
-short_description: /dxm 先按第一性原理做项目澄清，再启用大项目 AI 协作规范
-skill_description: 使用 /dxm 在项目根目录先按第一性原理做 project-grill（grilling / grill-with-docs / domain-modeling）澄清项目，再生成 AGENTS.md、项目开发规范、完整链路、文件结构和 PR 流程文档；中大型任务可用 /dxm trellis 接入 Trellis PRD 和任务工作流，完成后做对抗性检查。
-default_prompt: 在当前项目运行 /dxm：先判断目录状态，并按第一性原理做必要的 project-grill（grilling / grill-with-docs / domain-modeling），再生成或确认大项目 AI 协作规范文件；若这是中大型长期任务，再建议 /dxm trellis，并在 Trellis 完成后执行对抗性检查。
+interface:
+  display_name: "DXM 大项目开发规范"
+  short_description: "锁定项目根目录与工作模式，用可审计状态机治理初始化、验证和任务完成"
+  default_prompt: "Use $dxm to lock the canonical project root and workflow mode, inspect local evidence first, then apply the matching DXM readiness and completion gates."

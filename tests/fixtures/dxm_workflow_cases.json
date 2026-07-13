@@ -1,0 +1,285 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "description": "Synthetic DXM routing and completion-gate regression cases with no copied user or runtime data.",
+  "cases": [
+    {
+      "id": "audit-read-only-lock",
+      "coverage": "audit",
+      "input": {
+        "request": "先检查失败原因，暂时不要修改文件或运行态。",
+        "root_flavor": "posix",
+        "canonical_root": "/workspace/synthetic-project-alpha",
+        "observed_root": "/workspace/synthetic-project-alpha",
+        "local_evidence": [
+          "a valid DXM baseline is present",
+          "read-only logs are available"
+        ]
+      },
+      "expected": {
+        "mode": "audit",
+        "readiness": "READY",
+        "phase": "read_only",
+        "write_allowed": false,
+        "scope": [
+          "canonical_root"
+        ],
+        "question_budget": 0,
+        "local_evidence_first": true,
+        "evidence_gate": {
+          "required": [
+            "mode_lock",
+            "canonical_root_check"
+          ],
+          "insufficient_alone": []
+        },
+        "forbidden_actions": [
+          "file_write",
+          "scaffold",
+          "task_create",
+          "runtime_mutation"
+        ]
+      }
+    },
+    {
+      "id": "init-bounded-clarification",
+      "coverage": "init",
+      "input": {
+        "request": "初始化这个新项目；本地能确认的事实直接采用，只问会阻塞建档的问题。",
+        "root_flavor": "posix",
+        "canonical_root": "/workspace/synthetic-project-bravo",
+        "observed_root": "/workspace/synthetic-project-bravo",
+        "local_evidence": [
+          "project directory is empty",
+          "no DXM document set exists",
+          "delivery target is not yet stated"
+        ]
+      },
+      "expected": {
+        "mode": "init",
+        "readiness": "ABSENT",
+        "phase": "clarification",
+        "write_allowed": true,
+        "scope": [
+          "canonical_root",
+          "project_baseline",
+          "DXM_document_set"
+        ],
+        "question_budget": 3,
+        "local_evidence_first": true,
+        "evidence_gate": {
+          "required": [
+            "mode_lock",
+            "canonical_root_check",
+            "blocking_questions_resolved"
+          ],
+          "insufficient_alone": [
+            "unbounded_interview"
+          ]
+        },
+        "forbidden_actions": [
+          "write_before_root_and_mode_lock",
+          "ask_locally_discoverable_fact",
+          "scaffold_before_blocking_clarification_resolved"
+        ]
+      }
+    },
+    {
+      "id": "windows-root-mismatch",
+      "coverage": "root_mismatch_windows",
+      "input": {
+        "request": "检查当前目录的 DXM readiness。",
+        "root_flavor": "windows",
+        "canonical_root": "C:\\workspace\\synthetic-project-charlie",
+        "observed_root": "C:\\workspace\\synthetic-project-charlie\\module-one",
+        "local_evidence": [
+          "persisted baseline names the parent project root",
+          "command was invoked from a nested module"
+        ]
+      },
+      "expected": {
+        "mode": "audit",
+        "readiness": "BROKEN",
+        "phase": "root_lock_failed",
+        "write_allowed": false,
+        "scope": [
+          "canonical_root"
+        ],
+        "question_budget": 0,
+        "local_evidence_first": true,
+        "evidence_gate": {
+          "required": [
+            "canonical_root_check"
+          ],
+          "insufficient_alone": [
+            "document_presence_only"
+          ]
+        },
+        "forbidden_actions": [
+          "baseline_write",
+          "scaffold",
+          "report_READY"
+        ]
+      }
+    },
+    {
+      "id": "unc-root-mismatch",
+      "coverage": "root_mismatch_unc",
+      "input": {
+        "request": "检查共享工作区是否与已记录的项目根目录一致。",
+        "root_flavor": "unc",
+        "canonical_root": "\\\\synthetic-host\\synthetic-share\\synthetic-project-foxtrot",
+        "observed_root": "\\\\synthetic-host\\synthetic-share\\synthetic-project-foxtrot\\module-one",
+        "local_evidence": [
+          "persisted baseline names the shared project root",
+          "current directory is a nested module on the same share"
+        ]
+      },
+      "expected": {
+        "mode": "audit",
+        "readiness": "BROKEN",
+        "phase": "root_lock_failed",
+        "write_allowed": false,
+        "scope": [
+          "canonical_root"
+        ],
+        "question_budget": 0,
+        "local_evidence_first": true,
+        "evidence_gate": {
+          "required": [
+            "canonical_root_check"
+          ],
+          "insufficient_alone": [
+            "document_presence_only"
+          ]
+        },
+        "forbidden_actions": [
+          "baseline_write",
+          "scaffold",
+          "report_READY"
+        ]
+      }
+    },
+    {
+      "id": "review-scope-lock",
+      "coverage": "review_scope",
+      "input": {
+        "request": "只复审 DXM skill 及已批准的合成使用样本。",
+        "root_flavor": "posix",
+        "canonical_root": "/workspace/synthetic-dxm-repository",
+        "observed_root": "/workspace/synthetic-dxm-repository",
+        "local_evidence": [
+          "requested skill path is skills/dxm",
+          "approved fixture contains scoped synthetic samples"
+        ]
+      },
+      "expected": {
+        "mode": "audit",
+        "readiness": "READY",
+        "phase": "scope_locked",
+        "write_allowed": false,
+        "scope": [
+          "skills/dxm"
+        ],
+        "question_budget": 0,
+        "local_evidence_first": true,
+        "evidence_gate": {
+          "required": [
+            "scope_lock",
+            "sample_window_definition"
+          ],
+          "insufficient_alone": [
+            "unscoped_repository_scan"
+          ]
+        },
+        "forbidden_actions": [
+          "scan_unrelated_skills",
+          "scan_unrelated_chat_history",
+          "expand_scope_without_approval"
+        ]
+      }
+    },
+    {
+      "id": "service-completion-gate",
+      "coverage": "live_service_gate",
+      "input": {
+        "request": "修复服务连接失败，并在完成前证明真实入口已经恢复。",
+        "root_flavor": "posix",
+        "canonical_root": "/workspace/synthetic-project-delta",
+        "observed_root": "/workspace/synthetic-project-delta",
+        "local_evidence": [
+          "a service start command is documented",
+          "the original symptom is a failed client connection"
+        ]
+      },
+      "expected": {
+        "mode": "task",
+        "readiness": "READY",
+        "phase": "evidence_required",
+        "write_allowed": true,
+        "scope": [
+          "service_runtime",
+          "original_client_entry_point"
+        ],
+        "question_budget": 0,
+        "local_evidence_first": true,
+        "evidence_gate": {
+          "required": [
+            "listener",
+            "health",
+            "original_symptom_e2e"
+          ],
+          "insufficient_alone": [
+            "unit_test",
+            "config_inspection"
+          ]
+        },
+        "forbidden_actions": [
+          "claim_complete_without_runtime_evidence"
+        ]
+      }
+    },
+    {
+      "id": "ui-completion-gate",
+      "coverage": "ui_gate",
+      "input": {
+        "request": "按已批准的界面参考修复操作入口，并验证用户可以实际点击。",
+        "root_flavor": "posix",
+        "canonical_root": "/workspace/synthetic-project-echo",
+        "observed_root": "/workspace/synthetic-project-echo",
+        "local_evidence": [
+          "an approved UI reference is available",
+          "the reported symptom is an unreachable control"
+        ]
+      },
+      "expected": {
+        "mode": "task",
+        "readiness": "READY",
+        "phase": "evidence_required",
+        "write_allowed": true,
+        "scope": [
+          "rendered_UI",
+          "navigation_and_interaction"
+        ],
+        "question_budget": 0,
+        "local_evidence_first": true,
+        "evidence_gate": {
+          "required": [
+            "approved_reference",
+            "rendered_screenshot",
+            "navigation_hit_test",
+            "regression_check"
+          ],
+          "insufficient_alone": [
+            "source_inspection",
+            "unit_test"
+          ]
+        },
+        "forbidden_actions": [
+          "claim_complete_without_rendered_evidence",
+          "claim_complete_without_interaction_evidence"
+        ]
+      }
+    }
+  ]
+}

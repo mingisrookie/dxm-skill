@@ -8,6 +8,12 @@ Thumbs.db
 .agents/
 agent/
 
+# Local DXM/Trellis dogfood state may contain absolute roots and task receipts.
+# Keep the reusable skill, tests, and long-term docs in releases instead.
+.codex/
+.dxm/
+.trellis/
+
 # Guard against accidental HyperFrames/video skill installs in this repo.
 skills/animejs/
 skills/contribute-catalog/

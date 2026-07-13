@@ -1,5 +1,51 @@
 # 更新日志
 
+## v1.1.0 - 2026-07-13
+
+### 新增
+
+- 新增 `audit`、`init`、`task`、`scaffold-only` 四模式工作流，写入前锁定规范化项目根目录、工作模式和允许影响范围。
+- 新增 `.dxm/project.json` 项目基线，以及 `ABSENT`、`PARTIAL`、`READY`、`BROKEN` 四态只读审计。
+- 新增 `dxm_contract.py` 和 `validate_dxm.py`，统一 baseline、managed marker、readiness 与 completion receipt 契约。
+- 新增机器可读 completion receipt，按验收 ID 和证据类型校验完成声明、对抗检查、质量门及 Trellis 归档事实。
+- 新增策略契约、工作流案例、路径安全、隐私、readiness 和 receipt 回归测试。
+
+### 变更
+
+- `/dxm` 初始化改为本地证据优先，默认只单批询问 0–3 个真正阻塞的问题；完整逐轮 `grilling` 仅在用户明确要求时启用。
+- 核心 DXM 不再依赖相邻访谈技能；`grill-with-docs` 保持有界可选路由，`grill-me` 仅作为旧环境兼容别名。
+- 文档加载改为 `AGENTS.md` 始终必读，其余长期文档按受影响面选择性加载。
+- Trellis 完成链路收紧为“对抗检查 → finish → `archive --no-commit` → 归档回执校验”。
+- `agents/openai.yaml` 更新为当前 `interface` metadata 结构，并为 core-only 安装提供独立版本信息。
+
+### 修复
+
+- Trellis 命令缺失、超时、启动失败、非零退出或未产出完整集成时不再返回假成功。
+- `scaffold-only` 明确输出 `NOT_EVALUATED`，不再把模板写入成功误报为项目 `READY`。
+- 加固孤立、重复、交叉、乱序、非规范或未闭合 marker，以及未闭合 Markdown fence 的识别，避免在损坏文档上继续追加。
+- 加固受管文件及祖先路径检查，拒绝越出 root、symlink、reparse point、多硬链接和非普通文件。
+- Trellis 完成门只接受规范 `YYYY-MM` 归档目录，以及作为 `check.md` 文件首个非空、顶格独立行且全文唯一的 `<!-- DXM-CHECK:PASS -->`；其他或未闭合 marker-like 片段一律拒绝。
+- baseline 与 receipt 会规范化 credential-like 字段名并向嵌套容器传播检查；除显式环境变量引用和白名单脱敏占位外，凭据 literal 按安全字段路径拒绝且不回显敏感值。
+- 本地 `.dxm/project.json` 保留规范化绝对根目录；共享 Markdown 会先词法折叠 `.` / `..`，再使用 `$PROJECT_ROOT` / `$ABSOLUTE_PATH` 可移植投影，避免不同 clone 路径产生长期文档漂移。
+- `scaffold-only` 的目标路径存在文件型祖先时，真实执行和 `--dry-run` 都返回结构化 exit 2，不再抛出 traceback。
+- 修正 CI 文档与实际 workflow 不一致的描述，并将 `.codex/`、`.dxm/`、`.trellis/` 本地自用状态排除在发行产物之外。
+
+### 验证
+
+- `python -m unittest discover -s tests -v`：共 173 项，172 项通过，1 项因当前 Windows 账号缺少目录 symlink 权限跳过。
+- `python skills/dxm/scripts/scaffold_dxm.py --self-test`
+- `python skills/dxm/scripts/validate_dxm.py audit --root . --require-trellis --json`
+- `python -m py_compile` 覆盖本轮 Python 文件。
+- `git diff --check`
+- UTF-8、LF、BOM、中文乱码和敏感信息检查。
+- core-only 临时安装及本地 installed skill SHA-256 manifest 一致性检查。
+
+### 已知限制
+
+- 当前 Windows 账号无法执行目录 symlink 创建测试；hardlink、reparse/junction 和其他路径逃逸分支已有可执行覆盖。
+- completion receipt 校验器核验回执与证据结构，不会重跑证据命令或独立查询 Git 远端。
+- 已打开的 Codex 会话可能缓存旧 skill metadata，更新本地技能后需要重启 Codex。
+
 ## v1.0.4 - 2026-07-09
 
 ### 修复

@@ -7,131 +7,152 @@ description: Use when the user types /dxm or /dxm trellis, asks to generate or r
 
 ## Purpose
 
-DXM turns a project folder into a governed AI collaboration workspace. It creates or refreshes the standard project rule files, then requires future analysis, development, testing, documentation, Git, PR, and handoff work in that folder to follow those local rules. First `/dxm` is a project setup conversation: clarify the project before the docs become the long-term source of truth.
+DXM turns a project folder into a governed, persisted, and auditable AI collaboration workspace. It separates read-only audit, first-time initialization, normal project work, and template-only scaffolding so that a file write is never mistaken for project readiness or task completion.
 
 ## First-principles rule（第一性原理）
 
-Every requirements question — project-grill, `grilling`, `grill-with-docs`, legacy `grill-me`, `new-project-grill`, `lightweight-grill`, or inline — must start from first principles and adversarial questioning（质疑）, and the frame must be stated before asking the user. First collapse the problem to the real user outcome, irreversible constraints, observable local evidence, and unknown blockers. Then actively challenge hidden assumptions, over-scoped solutions, fake constraints, and user-suggested implementation bias — challenge assumptions instead of merely collecting answers. Finally, ask only the smallest set of questions that changes the next action.
+Start requirements work from first principles: identify the real user outcome, hard constraints, observable local evidence, and unknown blockers. Challenge hidden assumptions, fake constraints, over-scoped solutions, and implementation bias. Inspect facts that code, docs, config, logs, or runtime can answer instead of asking the user.
 
-## Trigger contract
+## Workflow state machine
 
-### `/dxm`
+Choose exactly one mode and establish a **root/mode/scope lock** before the first write. The lock records the canonical project root, one mode, and the allowed files/runtime surface. Do not silently widen or switch it. If the requested path, current directory, persisted baseline root, or task scope disagrees, stop writes and resolve the mismatch first.
 
-1. Treat the current working directory as the target project root unless the user gives another path. Do not run this in a broad drive root like `G:\` unless the user explicitly says that is the project root.
-2. If the user says `只分析`, `先看看`, or equivalent read-only language: inspect only and report what DXM would do. Do not scaffold or edit files, and stop here — none of the later items apply.
-3. If the user says `scaffold only`, `只生成模板`, or `先别问`: skip the grill routing in item 4 and continue from item 5.
-4. Otherwise classify the target before scaffolding and route it through the Project-grill modes table below, applying the first-principles rule before any question.
-5. Run the bundled scaffold script after the project intent is clear. Resolve `scripts/scaffold_dxm.py` relative to this skill's own directory (the skill loader reports the base path; typical installs are `%USERPROFILE%\.codex\skills\dxm` for Codex and `%USERPROFILE%\.claude\skills\dxm` for Claude Code; in a repo checkout use `skills/dxm/scripts/scaffold_dxm.py`):
+| Mode | Select when | Contract |
+| --- | --- | --- |
+| `audit` | The user says `只分析`, `先看看`, `暂时不改`, asks for review/investigation, or has not approved a mutation | Read-only: no scaffold, no Trellis task, no runtime mutation, and no file write. Report evidence and the locked scope only. |
+| `init` | The canonical root has no complete DXM baseline and the user wants to initialize or continue development | Inspect locally, run the bounded bootstrap below, persist the baseline, scaffold non-destructively, then audit readiness. |
+| `task` | Work is inside an existing READY/PARTIAL DXM workspace | Keep the existing baseline; do not rerun initialization. Lock this task's scope, load only relevant docs, and collect acceptance evidence. |
+| `scaffold-only` | The user explicitly says `scaffold only`, `只生成模板`, or `先别问` | Create or refresh only requested templates. No interrogation, no baseline/readiness claim, and no Trellis task unless separately requested. |
+
+Analysis-oriented wording selects `audit` unless the user explicitly requests initialization or implementation. A completed scaffold is not proof of `READY`; use the packaged audit result.
+
+## Bounded bootstrap contract
+
+This contract applies to default `init` and project-grill routing:
+
+1. **local evidence first**: inspect the locked root's README, manifests, source, config, tests, docs, logs, and safe runtime evidence before asking anything.
+2. Ask only **0–3 blocking questions in one batch**. A blocking question is one whose answer changes the next safe action, project boundary, or acceptance contract.
+3. For non-blocking choices, state the recommended assumption and proceed. `按推荐走`, `直接做`, or equivalent approval closes all remaining non-blocking clarification.
+4. Full/exhaustive, one-question-per-turn `grilling` is **explicit opt-in** only, such as when the user says `grill me`, `完整 grilling`, or asks to walk every branch. It is never the default DXM bootstrap cadence.
+5. Do not scaffold before required blocking answers are resolved. If there are no blockers, ask zero questions and proceed with stated assumptions.
+
+Core DXM must remain usable without sibling interview skills. `new-project-grill` and `lightweight-grill` are routing labels, `grill-with-docs` is an optional evidence-grounded router, and `grill-me` is a legacy optional alias.
+
+## Project-grill profiles
+
+| Profile | Use when | Default bounded focus |
+| --- | --- | --- |
+| `grill-with-docs` | Existing code, docs, README, manifests, scripts, or runtime evidence exist | Inspect first; ask only blockers about goal, current behavior, boundary, risk, acceptance, and non-goals. |
+| `new-project-grill` | Empty folder or a new project with no useful docs | Ask only unresolved blockers among user, delivery, core scope, constraints, acceptance, and maintenance. |
+| `lightweight-grill` | Scratch, demo, one-off script, or very small utility | Input/output, success criterion, and allowed side effects only when unresolved. |
+
+Use `domain-modeling` only when stable domain terminology, context boundaries, context maps, or ADR decisions actually need to be created or changed. Evidence gathering alone must not create those files.
+
+Redirect instead of initializing when the lock points at a leaf subdirectory, vendor/dependency tree, build output, broad drive/home/system root, or another root than the project baseline. Proceed only when the user confirms that exact directory is the maintained project root.
+
+## `/dxm` execution
+
+After locking `init` or `scaffold-only`, resolve `scripts/scaffold_dxm.py` relative to this skill directory and pass the locked write mode explicitly:
 
 ```text
-python "<skill-dir>/scripts/scaffold_dxm.py" --root "<project-root>"
+python "<skill-dir>/scripts/scaffold_dxm.py" --mode scaffold-only --root "<project-root>"
+python "<skill-dir>/scripts/scaffold_dxm.py" --mode init --root "<project-root>" --baseline "<baseline.json>"
 ```
 
-6. Ensure these files exist in the project root:
-   - `AGENTS.md`
-   - `项目开发规范（AI协作）.md`
-   - `项目完整链路说明.md`
-   - `项目文件结构说明.md`
-   - `开发者AI开发与PR提交流程.md`
-7. Do not overwrite existing project-specific docs unless the user explicitly asks for overwrite. Existing docs are likely hand-curated and higher value than templates.
-8. After scaffolding, read `AGENTS.md` and follow it for the rest of the session.
-9. If the scaffold reports an incomplete managed block, do not ignore it or claim success. Restore the missing end marker or ask whether to overwrite the affected generated file.
+`--mode init` rejects a missing baseline before any project write; `--mode scaffold-only` rejects `--baseline` and never reports READY. The legacy no-`--mode` CLI remains compatibility-only and cannot prove that the agent completed the init gate. Preserve existing hand-maintained content unless the user explicitly authorizes overwrite.
 
-### `/dxm trellis`
+Ensure the project root contains:
 
-Triggers: `/dxm trellis`, `/dxm 大开发`, `/dxm full`, or any request to enable DXM for large development workflow.
+- `AGENTS.md`
+- `项目开发规范（AI协作）.md`
+- `项目完整链路说明.md`
+- `项目文件结构说明.md`
+- `开发者AI开发与PR提交流程.md`
 
-1. First satisfy normal `/dxm` behavior and project-grill expectations, then run the same scaffold command with `--trellis --trellis-user "<developer-name>"` added; omit `--trellis-user` when the developer name is unknown — it defaults to the OS user name.
-2. This must remain non-destructive: DXM docs are created when missing, existing hand-maintained docs are preserved, DXM/Trellis marker blocks are appended once or refreshed only inside managed markers, and incomplete marker pairs fail loudly. Trellis is initialized non-interactively as `trellis init --codex -u <developer> -y --skip-existing`.
-3. If `trellis` is not on PATH, finish the normal DXM scaffold and report that Trellis initialization was skipped because the CLI is missing.
-4. When `.trellis/` exists, ensure the DXM safety overrides are present:
-   - `session_auto_commit: false` in `.trellis/config.yaml`;
-   - `trellis-start` Step 0 reads `AGENTS.md` and the DXM long-term docs first;
-   - the Trellis no-task workflow allows DXM inline work for small fixes and read-only analysis;
-   - every Trellis task completion runs the adversarial completion check (below) before finish/handoff;
-   - Trellis must not stage, commit, push, create PRs, or merge without explicit user authorization.
-5. Treat Trellis task files under `.trellis/` as part of the project workflow for the rest of the session.
+After scaffold, run the packaged readiness audit. `ABSENT`, `PARTIAL`, `READY`, and `BROKEN` are distinct states; never turn `PARTIAL` or `BROKEN` into a success-style next step.
+
+If a real Markdown managed marker is orphaned, duplicated, or out of order, stop rather than appending another block; marker examples inside complete fenced/inline code are documentation, not active blocks. Do not overwrite existing project-specific docs unless the user explicitly accepts that loss. Baseline and receipt validation rejects high-confidence credential material without echoing its value.
+
+## `/dxm trellis`
+
+Triggers: `/dxm trellis`, `/dxm 大开发`, `/dxm full`, or an explicit request to enable the large-development workflow.
+
+1. Satisfy the selected normal DXM mode and bounded bootstrap first.
+2. Run the scaffold with `--trellis --trellis-user "<developer-name>"`; when the name is unavailable, omit `--trellis-user`. The underlying command is `trellis init --codex -u <developer> -y --skip-existing`.
+3. An explicit Trellis request succeeds only when Trellis initialization succeeds. Missing CLI, timeout, or non-zero Trellis exit may leave ordinary DXM scaffold files behind, but the combined request remains failed and must not be reported complete.
+4. When `.trellis/` exists, require `session_auto_commit: false`, a DXM-aware `trellis-start`, inline routing for small/read-only work, and adversarial check before the `finish` → `archive <task> --no-commit` → archived receipt sequence.
+5. Trellis never stages, commits, pushes, creates/merges PRs, tags, or publishes without explicit user authorization.
 
 ## Scaffold CLI quick reference
 
-`scaffold_dxm.py` is non-destructive by default: it creates missing files from `assets/templates/`, skips existing files, appends the DXM block to an existing `AGENTS.md` only when the block is absent, refuses broad roots, and prints a concise created/skipped summary.
+`scaffold_dxm.py` is non-destructive by default: it creates missing files from `assets/templates/`, skips existing files, appends a missing managed block when safe, refuses broad/non-directory roots and unsafe link/non-directory/hardlink ancestors, and reports actual outcomes.
 
 | Flag | Use |
 | --- | --- |
-| `--root <path>` | Target project root; defaults to the current directory |
-| `--dry-run` | Report planned actions without writing files; use this for read-only planning evidence instead of guessing what scaffold would do |
-| `--refresh-blocks` | Non-destructive upgrade: refresh DXM/Trellis marker blocks while preserving manual content outside those blocks |
-| `--inventory-depth N` | Only when the initial file-structure seed should include nested paths (default 1) |
-| `--trellis`, `--trellis-user <name>` | Also initialize Trellis and append the Trellis safety blocks; `--trellis-user` defaults to the OS user name |
-| `--trellis-timeout-seconds N` | Max wait for `trellis init` (default 120) |
-| `--self-test` | Verify an installed skill package with packaged smoke checks |
-| `--allow-broad-root` | Only when the user explicitly confirms the target really is a drive, home, system, vendor, or build root |
-| `--force` | Overwrite existing DXM target files; only when the user explicitly asks to replace them and accepts loss of manual content |
+| `--root <path>` | Locked target project root; defaults to current directory |
+| `--mode init` | Lock initialization; requires `--baseline` before any write |
+| `--mode scaffold-only` | Lock template-only writing; forbids baseline/readiness claims |
+| `--baseline <json-file>` | Validate and persist the `init` project baseline |
+| `--dry-run` | Report planned actions without writing files |
+| `--refresh-blocks` | Refresh managed blocks while preserving manual content outside them |
+| `--inventory-depth N` | Include nested paths in the initial structure seed (default 1) |
+| `--trellis`, `--trellis-user <name>` | Request Trellis initialization and safety blocks |
+| `--trellis-timeout-seconds N` | Maximum wait for `trellis init` (default 120) |
+| `--self-test` | Run installed-package smoke checks |
+| `--allow-broad-root` | Use only after explicit confirmation of that broad root |
+| `--force` | Overwrite existing DXM target files only after explicit acceptance of manual-content loss |
 
-## Project-grill modes
+## Trellis task routing
 
-Use these labels consistently so future sessions route the same way:
-
-| Mode | Use when | Ask for |
-| --- | --- | --- |
-| `grill-with-docs` | Existing code, docs, README, manifests, scripts, or runtime evidence exist | Goal, current behavior, architecture boundary, domain terms/ADRs, risk, validation, non-goals |
-| `new-project-grill` | Empty folder or a new project with no useful docs | User, delivery shape, stack preference, core scope, non-goals, data/API/security, acceptance criteria, maintenance horizon |
-| `lightweight-grill` | Scratch, demo, one-off script, or very small utility | Only blockers: input/output, success criterion, allowed side effects |
-
-`new-project-grill` and `lightweight-grill` are DXM routing labels, not required standalone skills: execute them with `grilling`, the legacy `grill-me` alias, or concise inline questions. `grill-with-docs` routes the interview through `grilling` plus `domain-modeling`; when domain terms or ADRs change, also use `domain-modeling`.
-
-Skip or redirect the grill only in these cases:
-
-- Explicit scaffold-only or read-only intent (trigger contract items 2–3).
-- Existing complete DXM docs: do not repeat the grill unless the user asks to re-baseline.
-- Subdirectory misfire: tell the user to move to the project root; do not initialize the leaf folder.
-- vendor / dependency / build output: only initialize if the user says this is the thing they maintain or study.
-
-## Trellis routing policy
-
-DXM is the global project rule layer. Grill is the clarification step. Trellis is the durable task layer for medium/large work. Do not require the user to remember `/dxm trellis`: the agent must proactively classify task scale.
-
-| Task | Default |
+| Work | Route |
 | --- | --- |
-| Read-only analysis, log review, explanation | DXM inline; no Trellis task |
-| Small bug, one-file fix, light docs | DXM inline; no Trellis task unless requested |
-| New feature, new module, architecture change, cross-file refactor | Recommend or default to Trellis |
-| Requirements unclear and work will continue | project-grill first; Trellis if PRD/check memory matters |
-| Multi-stage or likely to span sessions | Trellis task required unless user opts out |
+| Read-only review, log analysis, explanation | `audit`; no task |
+| Small bug, one-file fix, light docs | `task` inline; no Trellis task unless requested |
+| New feature, module, architecture change, cross-file refactor | Recommend Trellis once; proceed when the user's request already approves that workflow |
+| Multi-stage or cross-session work | Persist a Trellis PRD unless the user opts out |
 
-Suggested wording for medium/large tasks:
+Trellis PRD belongs in `.trellis/tasks/<task>/prd.md`. Every started Trellis task must progress through create/start/check/finish truthfully; task files alone do not prove completion.
 
-> 我判断这是中大型/长期任务，建议走 Trellis：先 project-grill 问清楚，再写入 task PRD 后执行。可以吗？
+## selective docs loading
 
-Suggested wording for small tasks:
+`AGENTS.md` is **always** loaded. Then load only the long-term docs relevant to the affected surface:
 
-> 我按小修 inline 处理，不建 Trellis task。
+| Affected surface | Additional required doc |
+| --- | --- |
+| Any code, config, test, or documentation write | `项目开发规范（AI协作）.md` |
+| File layout, ownership, add/delete/rename | `项目文件结构说明.md` |
+| Entry point, runtime, config/state/data flow, service or UI behavior | `项目完整链路说明.md` |
+| Git, PR, merge, version, tag, release, publish | `开发者AI开发与PR提交流程.md` |
 
-### Adversarial completion check（对抗性检查）
+Project `AGENTS.md` may require a stricter pre-read set; obey that stricter local contract. Selective docs loading reduces unrelated context but never bypasses an explicit project rule.
 
-After every Trellis task reaches check/finish, or whenever the agent believes the Trellis work is done, run an adversarial check before marking it complete: challenge the result against requirements, hidden assumptions, negative paths, architecture boundaries, tests, docs, secrets, encoding, rollback/recovery, and user intent. Any blocking finding sends the task back into implement/check; do not finish on an unchecked result.
+## Evidence matrix and completion gate
 
-## Standard behavior inside a DXM workspace
+Persisted `acceptance_criteria[].id` and `acceptance_criteria[].evidence_kinds` in the baseline/PRD determine evidence, not generic confidence:
 
-Before any non-trivial code, test, script, config, documentation, Git, PR, or release work:
+- service claims require listener + health + original-symptom E2E;
+- UI claims require an approved reference when applicable + rendered screenshot + navigation/hit-test + regression check;
+- online/deployed claims require real entry-point readback;
+- restart-durability claims require restart/recovery verification.
 
-1. Read `AGENTS.md`.
-2. Read or re-check the three project maintenance docs: `项目文件结构说明.md`, `项目完整链路说明.md`, `项目开发规范（AI协作）.md`.
-3. If Git/PR/release/version/latest work is requested, also read `开发者AI开发与PR提交流程.md`.
-4. Resolve conflicts by observed runtime and current files first, then docs. If docs are stale and the task changes facts, update the docs before reporting completion.
+Unit tests or config/source inspection alone cannot prove those claims.
 
-## DXM operating rules
+Before reporting `init` or `task` complete, create a `schema_version: 1` machine-readable **completion receipt** and validate it with the packaged receipt validator. The trusted root must come from the locked workflow, never from receipt content. For Trellis work, the final canonical `check.md` must use exactly one `<!-- DXM-CHECK:PASS -->` fragment, as its first non-empty, column-zero standalone line, written only after no blocker remains; any other or unclosed `DXM-CHECK` fragment fails closed. Then run Trellis `finish`, run `task.py archive <task> --no-commit`, create the receipt at `.trellis/tasks/archive/<YYYY-MM>/<task>/completion.json`, and run `python "<skill-dir>/scripts/validate_dxm.py" receipt --root "<project-root>" --file .trellis/tasks/archive/<YYYY-MM>/<task>/completion.json`. A receipt must not predeclare `finished: true` before archive; `--no-commit` preserves the separate Git authorization boundary.
 
-- Separate user intent: `只分析/先看看` means read-only; `开始开发/直接改/提交` means execute to verified completion.
-- Apply the first-principles rule above to every requirements inquiry or grill call.
-- Use evidence, not memory: inspect files, configs, commands, diffs, tests, listeners, logs, and runtime output.
-- Phase work: plan the affected chain, change one stage at a time, verify each stage, then run a final global review and, for Trellis work, the adversarial completion check.
-- Preserve architecture boundaries: do not pile new logic into a main file when an existing module, provider, service, route, manager, or helper layer owns it.
-- Keep code and docs synchronized: file-structure changes update `项目文件结构说明.md`; runtime-flow changes update `项目完整链路说明.md`; process/boundary changes update `项目开发规范（AI协作）.md`.
-- Treat Chinese encoding as a completion blocker. Check modified Chinese docs, logs, comments, and UI strings for visible mojibake or replacement characters.
-- Protect secrets and runtime data. Never paste real tokens, passwords, API keys, account lists, or credential-bearing state into reports.
-- Final replies must say what changed, what was verified, which docs were synchronized, whether the Trellis adversarial check passed when applicable, and what risks or skipped checks remain. For release work, also report `VERSION`, `CHANGELOG.md`, tag, GitHub Release, Latest status, Chinese release notes, and compare link evidence.
+The validator schema binds `workflow_mode` and canonical `project_root` to `requirements[].id/status/evidence_kinds` and the per-ID/per-kind `evidence` map. It also records `adversarial_check`, `quality_checks` (`docs`, `encoding`, `secrets`, `rollback`), `trellis.required/task/check_passed/finished`, and `git.commit_performed/commit/push_performed/branch`. Git fields report observed truth; they never authorize an operation.
+
+Missing requirements/evidence, a missing/malformed/non-passing check verdict, a non-canonical archive month, trusted-root mismatch, credential material in normalized credential-like keys/values/nested contexts, or false Trellis completion makes the validator fail. Credential contexts only allow explicit environment references and allowlisted redacted placeholders. For a CLI/file-based Trellis receipt, the validator also proves that the input file is the archived task's actual `completion.json`; mapping inputs perform structure/state validation only and make no source-file claim. Errors identify safe field paths, never credential keys or values. Scope remains an agent/task-diff boundary: any scope drift found during review or the adversarial check also blocks completion and returns work to implement/check, but is not falsely claimed as a receipt-validator field.
+
+## Operating rules
+
+- Prefer live runtime, captured traffic, served assets, process config, persisted state, then source/docs.
+- Change one stage at a time and verify the original symptom plus relevant negative paths.
+- Preserve existing architecture boundaries and manual documentation.
+- Synchronize changed project facts into the relevant long-term docs.
+- Treat visible Chinese mojibake or replacement characters as a completion blocker.
+- Protect tokens, passwords, API keys, sessions, private runtime data, and sensitive filenames.
+- Final human output summarizes the validated completion receipt, any skipped checks, and residual risk; it never substitutes for the machine-readable gate.
 
 ## References
 
-Read `references/dxm-method.md` when you need the distilled method behind the generated files or when adapting the templates for another large project.
+Read `references/dxm-method.md` when adapting or explaining this state machine and its evidence/completion model.

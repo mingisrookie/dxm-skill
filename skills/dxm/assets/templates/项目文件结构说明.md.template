@@ -1,12 +1,14 @@
 # 项目文件结构说明
 
 > 项目：`{{project_name}}`  
-> 根目录：`{{project_root}}`  
+> 根目录：当前仓库根目录（`init` 后的本机规范化路径记录在 `.dxm/project.json`）
 > 初始化日期：`{{generated_date}}`
 
 本文档列出当前项目维护视角下的文件结构与职责。新增、删除、重命名源码、配置、长期文档后，必须同步更新本文。
 
 <!-- DXM-DOC-RULES:START -->
+
+<!-- DXM-CONTRACT:1 -->
 
 ## DXM 文档维护规则
 

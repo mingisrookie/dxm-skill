@@ -1,12 +1,14 @@
 # 项目开发规范（AI协作）
 
 > 项目：`dxm`
-> 根目录：`G:\dxm`
-> 初始化日期：`2026-07-09`
+> 根目录：当前仓库根目录（本机规范化路径记录在 `.dxm/project.json`）
+> 初始化日期：`2026-07-13`
 
 本文档是面向 AI 与开发者的大项目开发规范。目标是让项目更清晰、更可维护、更可测试，而不是让 AI 只追求“眼前能跑”。
 
 <!-- DXM-DOC-RULES:START -->
+
+<!-- DXM-CONTRACT:1 -->
 
 ## DXM 文档维护规则
 
@@ -17,60 +19,86 @@
 
 <!-- DXM-DOC-RULES:END -->
 
-## 本仓专属：三处契约同步规则
+## 本仓专属覆盖：契约同步与严格必读
 
-本仓是 dxm skill 的源码仓，同一份 DXM 契约在三处存在，且不能合并为一处（生成到用户项目里的 `AGENTS.md` 必须自包含，因为读它的 agent 可能没有安装 dxm skill）：
+本仓维护 DXM 契约本身，因此对通用 selective docs 采用更严格覆盖：任何代码、测试、脚本、配置或文档写入都必须实际阅读 `AGENTS.md`、`项目文件结构说明.md`、`项目完整链路说明.md` 和本文；涉及 Git/PR/version/tag/release/publish 时再读 `开发者AI开发与PR提交流程.md`。
 
-1. `skills/dxm/SKILL.md` — 触发时刻 agent 读的契约。
-2. `skills/dxm/assets/templates/*.template` — 安装进用户项目的长期文档。
-3. `skills/dxm/scripts/scaffold_dxm.py` — 实际执行行为（`FILES` 清单、管理块内容、`trellis init` 命令）。
+同一份行为契约分布在四层，修改任一层时必须核对其余层：
 
-修改任意一处的路由标签、生成文件清单、grill 模式、`trellis init` 命令或管理块语义时，必须同步核对另外两处，并运行 `python -m unittest tests.test_doc_sync`——该防漂移测试断言三处的关键不变量一致，改一处漏一处会直接红。
+1. `skills/dxm/SKILL.md` 与 `references/dxm-method.md`：触发、状态机、问题预算和完成门。
+2. `skills/dxm/assets/templates/`：生成到用户项目的自包含长期规则。
+3. `skills/dxm/scripts/scaffold_dxm.py`、`dxm_contract.py`、`validate_dxm.py`：写入、基线、readiness 和 receipt 的真实行为。
+4. `skills/dxm/agents/openai.yaml`、`README.md`、`tests/`：运行时元数据、公开用法和行为级防漂移契约。
+
+至少运行与影响面对应的定向测试；最终收口运行：
+
+```text
+python -m unittest discover -s tests -v
+python skills/dxm/scripts/scaffold_dxm.py --self-test
+python skills/dxm/scripts/validate_dxm.py audit --root . --require-trellis
+```
+
+核心包必须在只复制 `skills/dxm`、没有 sibling skills 的隔离目录中仍可执行 self-test 和 validator。Trellis 任务按“对抗检查 → `finish` → `task.py archive <task> --no-commit` → 在归档目录生成/校验 completion receipt → 人类回执”收口；不得在归档前预写 `finished: true`，也不得省略 `--no-commit` 绕过 Git 授权。
+
 
 ## 0. AI 协作执行协议
 
-### 0.1 开发前必须实际阅读
+### 0.1 selective docs（选择性必读）
 
-任何涉及代码、流程、UI、配置、测试、文档、提交、合并、发布的任务，开始前必须实际阅读或重新核对：
+`AGENTS.md` 是 always 必读入口。不能只凭历史记忆、上次会话摘要或“看起来知道项目”直接执行；再按受影响面读取或重新核对长期文档：
 
-1. `AGENTS.md`
-2. `项目文件结构说明.md`
-3. `项目完整链路说明.md`
-4. 当前文件
-
-不能只凭历史记忆、上次会话摘要或“看起来知道项目”直接开发。
-
-### 0.2 意图边界
-
-- 用户指出“先分析”“只分析”“暂时不改”时，只能输出分析，不得擅自改代码或提交。
-- 用户要求“开始开发”“按照清单开发”“提交代码”时，必须按阶段推进到完成，不能停在方案层。
-- 如果目标、边界或成功标准不清楚，先从第一性原理判断真实目标、硬约束、本地可查事实和仍阻塞的问题，再澄清；如果本地可以查清，优先查证。
-
-### 0.3 首次建档与 project-grill
-
-首次 `/dxm` 是项目建档入口，不是单纯模板生成命令。默认先做 `project-grill`，再生成或更新长期文档。
-
-`new-project-grill` 和 `lightweight-grill` 是 DXM 模式标签，不要求存在同名 skill；实际执行时优先用 `grilling`、`grill-with-docs`、`domain-modeling`，旧环境可用 legacy `grill-me` 或简短内联问答完成。
-
-每次 project-grill、`grilling`、`grill-with-docs`、`grill-me`、`new-project-grill` 或内联需求提问，都必须先提示 agent 从第一性原理出发：先压缩到真实用户结果、不可变约束、已观察证据和未知阻塞，主动质疑隐藏假设、过度方案、伪约束和用户给出的实现偏置，再只问会改变下一步行动的最少问题。
-
-| 场景 | 默认处理 |
+| 受影响面 | 追加必读 |
 | --- | --- |
-| 空目录 / 新项目 | `new-project-grill`：问清用户、交付形态、技术栈、核心范围、非目标、外部依赖、验收标准和维护周期 |
-| 已有代码 / 文档 | `grill-with-docs`：先读文件与文档，再用 `grilling` + `domain-modeling` 澄清需求、架构边界、术语、ADR、风险和验收 |
-| 临时脚本 / demo | `lightweight-grill`：只问阻塞执行的关键问题 |
-| 已有完整 DXM | 不重复 grill，除非用户要求重梳理 |
-| `scaffold only` / `先别问` | 只补模板，不 grill |
-| `只分析` / `先看看` | 只读，不初始化、不改文件 |
+| 任意代码、配置、测试或文档写入 | 当前文件 `项目开发规范（AI协作）.md` |
+| 文件新增/删除/重命名、目录职责或模块归属 | `项目文件结构说明.md` |
+| 入口、运行态、配置/状态/数据流、service/UI 链路 | `项目完整链路说明.md` |
+| Git/PR/合并/version/tag/release/publish | `开发者AI开发与PR提交流程.md` |
+
+如果 `AGENTS.md` 或更窄目录规则声明了更严格的开发前必读集合，遵守更严格规则。selective docs 只减少与当前任务无关的上下文，不得绕过项目约束。
+
+### 0.2 四模式状态机与意图边界
+
+每轮只允许一个模式，并建立 **root/mode/scope lock**。首次写入前锁定规范化项目根目录、模式和允许影响范围；当前路径、`.dxm/project.json` 根目录或任务范围不一致时停止写入，不得静默换根、换模式或扩范围。
+
+| 模式 | 选择条件 | 硬约束 |
+| --- | --- | --- |
+| `audit` | `先分析`、`只分析`、`暂时不改`、review/排查，或用户尚未授权改变状态 | 严格只读：不 scaffold、不创建 Trellis task、不改变运行态、不写文件。 |
+| `init` | 首次建立项目基线与治理文档 | 先查本地证据、做有界澄清、落盘基线、非破坏式 scaffold，再审计 readiness。 |
+| `task` | 在已有 READY/PARTIAL DXM 工作区开发或维护 | 沿用基线，不重复初始化；锁定本任务范围并收集验收证据。 |
+| `scaffold-only` | 用户明确说 `scaffold only`、`只生成模板`、`先别问` | 只补模板，不访谈、不创建 task、不宣称 READY。 |
+
+分析型措辞默认进入 `audit`；用户要求“开始开发”“按照清单开发”时才进入对应 `init`/`task`。用户说“提交代码”只表示任务目标，Git 操作仍受单独授权规则约束。
+
+### 0.3 首次建档与有界 project-grill
+
+`init` 采用同一套默认契约：
+
+1. 先从**第一性原理**识别真实目标、硬约束、本地事实和未知阻塞，主动**质疑隐藏假设**、伪约束、过度方案和实现偏置；再执行**本地证据优先**，查锁定根目录内的代码、README、manifest、配置、测试、文档、日志和安全运行态，本地可知事实不得反问。
+2. 默认只在**单批提出 0–3 个阻塞性问题**。阻塞问题必须会改变下一步安全动作、root/scope 边界或验收契约。
+3. 非阻塞选择记录推荐假设后继续；用户说 `按推荐走`、`直接做` 或同义表达时，关闭剩余非阻塞澄清。
+4. 完整/穷举、逐题 `grilling` 仅 **explicit opt-in**。只有用户明确说 `grill me`、`完整 grilling` 或要求遍历所有分支时才启用；默认 init 不得使用 exhaustive cadence。
+5. 有未解决阻塞项时不得 scaffold；没有阻塞项就问 0 个并继续。
+
+| 场景 | 有界 profile |
+| --- | --- |
+| 空目录 / 新项目 | `new-project-grill`：只处理用户、交付、核心范围、约束和验收中的阻塞项 |
+| 已有代码 / 文档 | `grill-with-docs`：先读证据，再用同一套 0–3 契约澄清 |
+| 临时脚本 / demo | `lightweight-grill`：只处理输入输出、成功标准、允许副作用中的阻塞项 |
+| 已有完整 DXM | 进入 `task`，除非用户明确要求 re-baseline |
+
+`new-project-grill`、`lightweight-grill` 是标签，`grill-with-docs` 是可选 router，legacy `grill-me` 只是可选别名；核心 DXM 必须能以内联问答完成。`domain-modeling` 只在稳定术语、上下文边界、context map 或 ADR 决策实际新增/变化时写入，普通查证不创建域文档。
+
+写入门必须进入 CLI：`init` 运行 `scaffold_dxm.py --mode init --root <root> --baseline <baseline.json>`；明确模板专用才运行 `--mode scaffold-only --root <root>`。前者缺 baseline 必须零写入失败；后者输出 `readiness: NOT_EVALUATED`，不能冒充 READY。无 `--mode` 调用只保留旧兼容语义。
 
 ### 0.4 Trellis 使用边界
 
 Trellis 是中大型任务记忆层，不替代 DXM。
 
 - 小修、只读排查、单点 bug、轻量文档调整：默认 DXM inline，不建 Trellis task。
-- 新功能、多模块、架构变化、跨文件重构、长周期任务、需求不清楚：先 project-grill，再建议或创建 Trellis task。
+- 新功能、多模块、架构变化、跨文件重构、长周期任务：完成有界 project-grill 后建议一次 Trellis；用户请求已经批准时可创建 task。
 - Trellis PRD 必须写入 `.trellis/tasks/<task>/prd.md`；不能只依赖聊天上下文。
-- 每次 Trellis 任务完成、进入 check/finish 或准备 handoff 前，必须执行一遍对抗性检查；检查需求偏差、隐藏假设、负路径、架构边界、测试、文档、敏感信息、乱码和回滚/恢复。存在阻断问题时回到 implement/check，不得 finish。
+- create/start/check/finish 状态必须真实；显式 Trellis 请求遇到 CLI 缺失、超时或失败时，普通 DXM 文件可以已生成，但 DXM + Trellis 整体不得报告成功。
+- 每次 Trellis 任务进入 finish/handoff 前必须执行对抗性检查；检查需求偏差、隐藏假设、负路径、架构边界、测试、文档、敏感信息、乱码和回滚/恢复。存在阻断问题时回到 implement/check，不得 finish。
 - Trellis 不能自动 stage、commit、push 或创建/合并 PR；Git 操作必须得到用户明确授权。
 
 ### 0.5 发布 / Release 完成面
@@ -164,6 +192,19 @@ Trellis 是中大型任务记忆层，不替代 DXM。
 - 改文档-only：至少做文档内容、链接和乱码检查。
 - 测试失败时不得提交；除非用户明确要求保留失败状态用于排查，否则必须先修复。
 
+### 3.3 evidence matrix（声明与证据矩阵）
+
+基线中的每条验收标准必须使用稳定的 `acceptance_criteria[].id`，并通过 `acceptance_criteria[].evidence_kinds` 声明所需证据；PRD 采用同一组 ID。最低证据按声明类型确定：
+
+| 声明 | 必须提供的证据 |
+| --- | --- |
+| `service` 可用/故障已修复 | `listener` + `health` + `original-symptom E2E` |
+| `UI` 正确/可用 | 适用时的 `approved reference` + `rendered screenshot` + `navigation/hit-test` + `regression` |
+| `online/deployed` | 真实入口的 `entry-point readback` |
+| `restart durability` | 实际 `restart/recovery` 验证 |
+
+单元测试、源码阅读或配置检查只能作为辅助证据，不能单独证明运行态、UI、上线或重启持久性声明。验收项没有所需证据时保持未完成。
+
 ## 4. 文档更新规范
 
 必须更新长期文档的场景：
@@ -182,7 +223,7 @@ Trellis 是中大型任务记忆层，不替代 DXM。
 
 每次修改后至少自问：
 
-1. 我开发前是否重新核对了 `AGENTS.md` 和三份根目录长期文档？
+1. 我是否 always 读取了 `AGENTS.md`，并按 selective docs 表核对了本任务相关长期文档及更严格的本地必读要求？
 2. 我这次新增逻辑是不是应该下沉到模块？
 3. 我有没有漏掉配置、状态、日志、错误处理、测试或文档中的一环？
 4. 我有没有补或迁移测试？
@@ -191,7 +232,7 @@ Trellis 是中大型任务记忆层，不替代 DXM。
 7. 我有没有新增不必要的兼容分支、兜底分支或旧逻辑？
 8. 如果本次涉及发布，我是否同步了版本号、`CHANGELOG.md`、tag、GitHub Release、Latest、中文更新日志、对比链接和验证证据？
 9. 我有没有保护敏感文件，不回显真实 token、密码、API Key 或账号明细？
-10. 如果本次是 Trellis 任务，我有没有在完成后执行对抗性检查，并处理阻断发现？
+10. 如果本次是 Trellis 任务，我是否核对了 create/start/check/finish 真实状态，并在 finish 前执行对抗性检查、处理阻断发现？
 
 ## 7. 完成标准
 
@@ -200,20 +241,60 @@ Trellis 是中大型任务记忆层，不替代 DXM。
 - 代码职责边界清晰。
 - 新旧功能链路完整。
 - 开发清单各阶段已逐项完成并自检。
-- 关键路径测试或检查已通过。
+- 每个 acceptance ID 都有 evidence matrix 要求的证据，关键路径及原始症状已验证。
 - 根目录长期文档已同步。
 - 没有可见乱码。
 - Trellis 任务的对抗性检查已完成，且没有未处理阻断问题。
 - 工作区范围已确认，没有误提交草稿、密钥、运行态数据或无关文件。
+- 机器可读 completion receipt 已通过 validator；未通过时不得声称完成。
 
-## 8. AI 最终回执要求
+## 8. completion receipt 与最终回执
 
-完成开发或审查后，最终回复必须简明说明：
+`init` 或 `task` 声称完成前必须生成 `schema_version: 1` 的机器可读 completion receipt，并使用 DXM validator 校验。Trellis 任务必须先通过对抗检查，把最终 `check.md` 的文件首个非空行写成顶格独立的 `<!-- DXM-CHECK:PASS -->`，确保该片段全文只出现一次且不存在其他或未闭合 `DXM-CHECK` 片段；执行 `finish`，再执行 `task.py archive <task> --no-commit`。只有归档完成后，才在 `.trellis/tasks/archive/<YYYY-MM>/<task>/completion.json` 生成回执并执行：
+
+```text
+python "<skill-dir>/scripts/validate_dxm.py" receipt --root "<project-root>" --file .trellis/tasks/archive/<YYYY-MM>/<task>/completion.json
+```
+
+普通 `finish` 不等于可审计的完成事实；归档前不得预写 `finished: true`。归档必须携带 `--no-commit`，避免 Trellis 默认行为绕过用户的 Git 授权边界。CLI/file 校验必须确认输入就是归档 task 的真实 `completion.json`，且归档月份目录严格匹配 `YYYY-MM`；baseline/receipt 会规范化 credential-like key 并向嵌套容器传播检查，凭据上下文只允许显式 env 引用或白名单脱敏占位，错误只报安全字段路径且不得回显凭据。
+
+schema 必须与 validator 一致：
+
+- `workflow_mode` 与 `project_root`，后者必须是 root/mode/scope lock 的规范化根目录；
+- `requirements[]` 中每项的 `id`、`status`（完成时为 `passed`）和 `evidence_kinds`；
+- `evidence` 按 requirement ID、kind 映射到安全证据引用列表；
+- `adversarial_check.passed` 与摘要；
+- `quality_checks` 下的 `docs`、`encoding`、`secrets`、`rollback` 布尔结果；
+- `trellis.required`，以及适用时的 `task`、`check_passed`、`finished` 真实状态；
+- `git.commit_performed` / `commit` 和 `push_performed` / `branch` 真实状态；只记录事实，不得自动执行 Git 操作。
+
+缺需求、缺证据、对抗检查失败、`check.md` 缺失/非 PASS/格式不合法、非规范月份目录、可信 root 不一致、高置信凭据或虚假 Trellis 完成状态时，validator 必须拒绝。scope 由任务锁、diff 审查和对抗检查单独执行；发现扩范围同样回到 implement/check，但不得伪称为 receipt schema 字段。
+
+最终人类回执只能忠实摘要已验证的 completion receipt，并简明说明：
 
 1. 改了什么。
 2. 是否遵守本规范，尤其是架构边界、文档同步、测试和乱码检查。
-3. 跑了哪些测试或检查；如是 Trellis 任务，还要说明对抗性检查结论。
+3. 跑了哪些测试、evidence matrix 验收或检查；如是 Trellis 任务，还要说明对抗性检查和 finish 状态。
 4. 是否提交、提交号是什么。
 5. 是否推送、推送到哪个分支。
 6. 如涉及发布，必须说明 `VERSION`、`CHANGELOG.md`、tag、GitHub Release URL、Latest 校验、中文 Release notes、对比链接和验证证据。
-7. 如果有未完成项、未运行测试或残余风险，必须明确说出。
+7. 如果有未完成项、未运行测试、缺失证据或残余风险，必须明确说出。
+
+<!-- DXM-TRELLIS:START -->
+
+## DXM + Trellis 协作规则
+
+Trellis 只用于中大型开发任务的 PRD、任务状态和检查沉淀。默认路由：
+
+| 场景 | 默认处理 |
+| --- | --- |
+| 只分析 / 先看看 | 只读，不建 task |
+| 小修 / 单点 bug / 单文件文档调整 | DXM inline，不建 task |
+| 新功能 / 多模块 / 架构 / 跨文件 / 长周期 | DXM core 有界 project-grill；获准后建 Trellis task |
+| 需求不清楚但会继续开发 | 先查本地证据并单批问 0–3 个阻塞问题；匹配时可用有界 `grill-with-docs`，full `grilling` 仅 explicit opt-in |
+| 用户明确 scaffold only / 先别问 | 只 scaffold，不 grill，不建 task |
+
+启用 Trellis 时必须保持 `session_auto_commit: false`，并遵守本项目 Git/PR 授权规则。
+每次需求澄清先从第一性原理出发并质疑隐藏假设，本地证据优先、单批 0–3 个阻塞问题；每次 Trellis 任务完成后先做对抗性检查，再按 `finish` → `archive <task> --no-commit` → 归档回执校验收口。
+
+<!-- DXM-TRELLIS:END -->

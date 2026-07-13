@@ -1,12 +1,14 @@
 # 项目完整链路说明
 
 > 项目：`{{project_name}}`  
-> 根目录：`{{project_root}}`  
+> 根目录：当前仓库根目录（`init` 后的本机规范化路径记录在 `.dxm/project.json`）
 > 初始化日期：`{{generated_date}}`
 
 本文档说明当前项目从输入、配置、启动、核心处理到产出的完整链路。开发前应先读 `项目文件结构说明.md`，再读本文，最后对照 `项目开发规范（AI协作）.md` 做变更。
 
 <!-- DXM-DOC-RULES:START -->
+
+<!-- DXM-CONTRACT:1 -->
 
 ## DXM 文档维护规则
 
