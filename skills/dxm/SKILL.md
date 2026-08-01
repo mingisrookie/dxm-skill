@@ -26,6 +26,8 @@ Choose exactly one mode and establish a **root/mode/scope lock** before the firs
 
 Analysis-oriented wording selects `audit` unless the user explicitly requests initialization or implementation. A completed scaffold is not proof of `READY`; use the packaged audit result.
 
+When a continue-development request matches both `init` and `task` because the workspace is `PARTIAL`, `task` wins by default: keep the existing baseline artifacts and list the readiness gaps as pending work. Choose `init` on a `PARTIAL` workspace only when the gap is the project baseline itself and the user agrees to establish it.
+
 ## Bounded bootstrap contract
 
 This contract applies to default `init` and project-grill routing:
@@ -71,7 +73,7 @@ Ensure the project root contains:
 
 After scaffold, run the packaged readiness audit. `ABSENT`, `PARTIAL`, `READY`, and `BROKEN` are distinct states; never turn `PARTIAL` or `BROKEN` into a success-style next step.
 
-If a real Markdown managed marker is orphaned, duplicated, or out of order, stop rather than appending another block; marker examples inside complete fenced/inline code are documentation, not active blocks. Do not overwrite existing project-specific docs unless the user explicitly accepts that loss. Baseline and receipt validation rejects high-confidence credential material without echoing its value.
+If a real Markdown managed marker is orphaned, duplicated, or out of order, stop rather than appending another block; marker examples inside complete fenced/inline code are documentation, not active blocks. Do not overwrite existing project-specific docs unless the user explicitly accepts that loss. Baseline, run, and receipt validation reject high-confidence credential material without echoing its value.
 
 ## `/dxm trellis`
 
@@ -107,11 +109,21 @@ Triggers: `/dxm trellis`, `/dxm 大开发`, `/dxm full`, or an explicit request 
 | Work | Route |
 | --- | --- |
 | Read-only review, log analysis, explanation | `audit`; no task |
-| Small bug, one-file fix, light docs | `task` inline; no Trellis task unless requested |
+| Small clear bug, one-file fix, light docs | `task` inline **run-only**; create a lightweight run but no Trellis task unless requested |
 | New feature, module, architecture change, cross-file refactor | Recommend Trellis once; proceed when the user's request already approves that workflow |
 | Multi-stage or cross-session work | Persist a Trellis PRD unless the user opts out |
 
 Trellis PRD belongs in `.trellis/tasks/<task>/prd.md`. Every started Trellis task must progress through create/start/check/finish truthfully; task files alone do not prove completion.
+
+## Lightweight run contract
+
+Every writable `task` creates a `schema_version: 1` run at `.dxm/runs/<run_id>/run.json` before the first source/config/test/doc change. `init` creates it immediately after the validated baseline is persisted and before implementation work. The run locks canonical root, start time, original goal, scope, author, stable outcomes, `claim_type`, `evidence_kinds`, `baseline_impact`, risk, Trellis routing, and `unverified_boundaries`. Validate it with `validate_dxm.py run --root "<project-root>" --file .dxm/runs/<run_id>/run.json`.
+
+Small clear work stays **run-only**. If intent is ambiguous and the answer changes safety, scope, or acceptance, inspect locally and ask one batch of 0–3 blocking questions; do not force a full interview. Infer delivery from the user's task, not from what is easiest to prove:
+
+- behavior words such as fix/enable/take effect/work normally require runtime-appropriate evidence;
+- explicit **source-only** work may finish as source delivery only, must list `unverified_boundaries`, and must not claim runtime effect, deployment, or online recovery;
+- if required runtime evidence cannot be obtained, report partial/blocked instead of silently shrinking the original goal.
 
 ## selective docs loading
 
@@ -128,7 +140,7 @@ Project `AGENTS.md` may require a stricter pre-read set; obey that stricter loca
 
 ## Evidence matrix and completion gate
 
-Persisted `acceptance_criteria[].id` and `acceptance_criteria[].evidence_kinds` in the baseline/PRD determine evidence, not generic confidence:
+Persisted baseline/PRD criteria define durable invariants, while the run outcomes define this task's claims and evidence. `baseline_impact` must cover every baseline ID exactly once as `affected` (with outcome IDs) or `not_affected` (with a rationale); untouched invariants are not re-labelled as freshly passed.
 
 - service claims require listener + health + original-symptom E2E;
 - UI claims require an approved reference when applicable + rendered screenshot + navigation/hit-test + regression check;
@@ -137,11 +149,11 @@ Persisted `acceptance_criteria[].id` and `acceptance_criteria[].evidence_kinds` 
 
 Unit tests or config/source inspection alone cannot prove those claims.
 
-Before reporting `init` or `task` complete, create a `schema_version: 1` machine-readable **completion receipt** and validate it with the packaged receipt validator. The trusted root must come from the locked workflow, never from receipt content. For Trellis work, the final canonical `check.md` must use exactly one `<!-- DXM-CHECK:PASS -->` fragment, as its first non-empty, column-zero standalone line, written only after no blocker remains; any other or unclosed `DXM-CHECK` fragment fails closed. Then run Trellis `finish`, run `task.py archive <task> --no-commit`, create the receipt at `.trellis/tasks/archive/<YYYY-MM>/<task>/completion.json`, and run `python "<skill-dir>/scripts/validate_dxm.py" receipt --root "<project-root>" --file .trellis/tasks/archive/<YYYY-MM>/<task>/completion.json`. A receipt must not predeclare `finished: true` before archive; `--no-commit` preserves the separate Git authorization boundary.
+Runtime-sensitive evidence uses a **structured observation** with `observed_at`, `subject`, `method`, `result`, and `summary`. When a project-local artifact `path` is supplied, include its `sha256`; the validator checks boundary, existence, and hash. An isolated proof additionally sets `isolated: true`, `final_artifact: true`, and a non-empty `decisive_branch`; merely launching a window is not an E2E. High-risk release/deploy/live-data/multi-module architecture work sets `independent_review_required: true` and needs a fresh `independent_review` PASS from an Agent different from the run author. The receipt uses `artifact_sha256` to bind canonical `independent-review.md` (`.trellis/tasks/.../<task>/` for Trellis, `.dxm/runs/<run_id>/` for run-only), whose top-level `reviewer_id`, timezone-aware `reviewed_at`, and `verdict: PASS` must match the review metadata. Normal small fixes do not.
 
-The validator schema binds `workflow_mode` and canonical `project_root` to `requirements[].id/status/evidence_kinds` and the per-ID/per-kind `evidence` map. It also records `adversarial_check`, `quality_checks` (`docs`, `encoding`, `secrets`, `rollback`), `trellis.required/task/check_passed/finished`, and `git.commit_performed/commit/push_performed/branch`. Git fields report observed truth; they never authorize an operation.
+Before reporting `init` or `task` complete, create a `schema_version: 2` machine-readable **completion receipt** and validate it. It binds `run_id` + `run_sha256`, task-specific `requirements[].id/status/evidence_kinds`, per-ID/per-kind `evidence`, `baseline_impact`, and `unverified_boundaries`; it also records `independent_review` when required, `adversarial_check`, `quality_checks` (`docs`, `encoding`, `secrets`, `rollback`), `trellis.required/task/check_passed/finished`, and `git.commit_performed/commit/push_performed/branch`. Default validation rejects legacy v1; `--legacy-v1` is historical audit-only and never proves current completion.
 
-Missing requirements/evidence, a missing/malformed/non-passing check verdict, a non-canonical archive month, trusted-root mismatch, credential material in normalized credential-like keys/values/nested contexts, or false Trellis completion makes the validator fail. Credential contexts only allow explicit environment references and allowlisted redacted placeholders. For a CLI/file-based Trellis receipt, the validator also proves that the input file is the archived task's actual `completion.json`; mapping inputs perform structure/state validation only and make no source-file claim. Errors identify safe field paths, never credential keys or values. Scope remains an agent/task-diff boundary: any scope drift found during review or the adversarial check also blocks completion and returns work to implement/check, but is not falsely claimed as a receipt-validator field.
+For Trellis work, the final canonical `check.md` must use exactly one `<!-- DXM-CHECK:PASS -->` fragment as its first non-empty, column-zero standalone line, written only after no blocker remains. Then run `finish`, `task.py archive <task> --no-commit`, create `.trellis/tasks/archive/<YYYY-MM>/<task>/completion.json`, and validate it. A run-only task writes `.dxm/runs/<run_id>/completion.json`. Missing/failing/stale evidence, run/outcome/impact drift, an invalid check verdict or path, missing independent review, trusted-root mismatch, credentials, or false Trellis state fails closed. Git fields report truth and never authorize operations.
 
 ## Operating rules
 

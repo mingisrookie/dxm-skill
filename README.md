@@ -4,7 +4,7 @@
 
 **把普通项目目录升级成可持续维护、可追踪、可验证的 Codex AI 协作工作区。**
 
-先锁定项目根目录和工作模式，再按需审查、初始化或执行任务；小修走内联处理，中大型任务接入 Trellis。
+先锁定项目根目录和工作模式，再按需审查、初始化或执行任务；可写小修走 lightweight run-only，中大型任务接入 Trellis。
 脚手架默认 UTF-8 + LF，只补缺失内容，不静默覆盖人工文档。
 
 [快速使用](#快速使用) · [最新更新](#最新更新摘要) · [DXM 工作流](#dxm-工作流) · [Trellis 路由](#dxm--trellis) · [生成文件](#生成文件)
@@ -26,7 +26,7 @@ DXM 不是一次性模板生成器。它把“项目规则、开工前澄清、�
 | --- | --- |
 | 项目还没有 AI 协作规则 | 输入 `/dxm`，生成或确认 `AGENTS.md` 和四份长期中文项目文档。 |
 | 需求或边界还不清楚 | 首次 `/dxm` 默认先 `project-grill`，问清目标、范围、风险和验收。 |
-| 只是小修或只读排查 | 走 DXM 内联处理，不强制创建 Trellis 任务。 |
+| 只是小修或只读排查 | 只读保持 audit；可写小修建 lightweight run，但不强制 Trellis 任务。 |
 | 是多模块、中大型、长期任务 | 用 `/dxm trellis` / `/dxm 大开发`，把 PRD、状态和执行入口交给 Trellis。 |
 | 担心脚手架误写 | 先 `--dry-run` 看计划；默认拒绝盘根、用户根、系统目录、依赖目录和构建产物目录。 |
 | 担心覆盖人工文档 | 默认只创建缺失文件；`--refresh-blocks` 只更新 DXM 管理块，保留人工内容。 |
@@ -47,14 +47,16 @@ DXM 不是一次性模板生成器。它把“项目规则、开工前澄清、�
 
 完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。README 只保留最近一版重点，避免发布时双份维护。
 
-**v1.1.0 - 2026-07-13**
+**v1.2.0 - 2026-08-01**
 
 | 更新 | 作用 |
 | --- | --- |
-| 四模式工作流 | 用 `audit`、`init`、`task`、`scaffold-only` 分离只读审查、首次建档、日常任务和纯模板生成。 |
-| 可审计完成门 | 新增项目基线、readiness 四态、证据矩阵、机器可验 check verdict 与 completion receipt validator。 |
-| 真实失败语义 | Trellis 缺失、超时、失败或集成不完整不再被误报为成功。 |
-| 安全与回归加固 | 补齐 marker、路径链接、凭据、UTF-8、隐私和 core-only 安装回归。 |
+| 任务目标绑定 | 每个可写任务先建立 lightweight run；receipt v2 绑定 run hash、task outcomes 和 baseline impact，Agent 不能静默缩小目标。 |
+| 运行态证据门 | 源码、配置或单测不再单独证明运行态；structured observation、artifact hash 与 isolated 决定性分支按任务声明校验。 |
+| 高风险独立复核 | 发布、部署等 high-risk 工作必须由不同 Agent 复核，并 hash-bind canonical review artifact。 |
+| 安全与迁移 | 收紧 Windows run ID、review 替换、pass-padding、敏感错误回显和 legacy receipt；旧 contract marker 1 可非破坏式刷新。 |
+
+完整更新记录：[v1.1.0...v1.2.0](https://github.com/mingisrookie/dxm-skill/compare/v1.1.0...v1.2.0)
 
 ---
 
@@ -100,7 +102,7 @@ install-skill-from-github.py --repo mingisrookie/dxm-skill --path skills/dxm
 | `只分析` / `先看看` | `audit`：只读，不初始化、不建任务、不改运行态或文件。 |
 | 空文件夹 / 新项目 | `init` / `new-project-grill`：先查本地证据，一批最多问 0–3 个真正阻塞的问题，再持久化基线并建档。 |
 | 已有代码 / 文档但未建档 | `init`：先读现有材料，再用同一套 0–3 契约澄清；已安装且明确匹配的 bounded router 可以辅助，但不改变节奏。 |
-| 已有 DXM 的开发工作 | `task`：复用现有基线，不重复初始化；小脚本 / demo 使用 `lightweight-grill` 的最小问题预算。 |
+| 已有 DXM 的开发工作 | `task`：复用现有基线，不重复初始化；写入前建 `.dxm/runs/<run_id>/run.json`，小而明确的修改保持 run-only。 |
 | `scaffold only` / `先别问` | `scaffold-only`：只生成或补齐模板，不做项目访谈，也不宣称工作区已 READY。 |
 
 `new-project-grill` 和 `lightweight-grill` 只是核心 DXM 的澄清强度标签，不构成硬依赖。可选 skills 只有单独安装后才可能被路由；其中 full `grilling` 必须用户明确点名，bounded `grill-with-docs` 可在描述匹配时辅助，`domain-modeling` 只在稳定域事实确实变化时写入，`grill-me` 只作为旧环境兼容别名。
@@ -164,9 +166,12 @@ python skills/dxm/scripts/scaffold_dxm.py --mode scaffold-only --root /path/to/p
 ```bash
 python skills/dxm/scripts/validate_dxm.py audit --root /path/to/project --json
 python skills/dxm/scripts/validate_dxm.py baseline --file /path/to/baseline.json --json
+python skills/dxm/scripts/validate_dxm.py run --root /path/to/project --file .dxm/runs/<run_id>/run.json --json
 ```
 
-非 Trellis 的 `init` / `task` 可以直接校验锁定根目录内的回执。Trellis 必须先通过对抗检查，并把最终 `check.md` 的文件首个非空行写成顶格独立的 `<!-- DXM-CHECK:PASS -->`；该片段全文只能出现一次，其他、混合或未闭合 `DXM-CHECK` 片段一律失败。随后才可真实 finish 和归档；归档强制 `--no-commit`，避免绕过 Git 授权。归档前不要预写 `finished: true`：
+run schema 为 v1，completion receipt schema 为 v2（`--version` 显示 `run-schema=1 receipt-schema=2`）。receipt 用 `run_id` + `run_sha256` 绑定任务 outcomes 和 `baseline_impact`：明确 source-only 必须列 `unverified_boundaries`，不能声称运行态已生效；行为/服务/UI/部署证据使用带 `observed_at` 的 structured observation；高风险任务需要不同 Agent 的 independent review，并用 `artifact_sha256` 绑定 task/run 目录的 canonical `independent-review.md`（含匹配的 `reviewer_id`、带时区 `reviewed_at`、`verdict: PASS`）。
+
+非 Trellis 的 run-only `init` / `task` 在 `.dxm/runs/<run_id>/completion.json` 收口。Trellis 必须先通过对抗检查，并把最终 `check.md` 的文件首个非空行写成顶格独立的 `<!-- DXM-CHECK:PASS -->`；随后真实 finish 和归档，归档强制 `--no-commit`：
 
 ```bash
 python .trellis/scripts/task.py finish
@@ -177,10 +182,11 @@ python skills/dxm/scripts/validate_dxm.py receipt --root /path/to/project --file
 
 - `audit` 检查五份 DXM 文档、真实 Markdown managed marker、`.dxm/project.json`、根目录一致性及可选 Trellis 完整性；完整 fenced/inline code 中的 marker 示例不算活动块，未闭合 fence 不能掩盖错误。需要 Trellis 时追加 `--require-trellis`。
 - `baseline` 只校验项目基线 schema。
-- `baseline` / `receipt` 会拒绝 Bearer、private-key header、真实 `sk-...`、`api_key=...` 等高置信凭据；credential-like 字段名会先忽略大小写及空格、点、横线、下划线做规范化，并把检查向 `credentials` / `secrets` / `auth` 等嵌套容器传播。凭据上下文只豁免 `${NAME}`、`env:NAME`、`<env:NAME>` 和明确白名单脱敏占位；错误只报告安全字段路径，不回显 key/value。
-- `receipt` 仅接受 `init` / `task`，要求从已锁定 workflow 传入可信 `--root`，再校验 baseline requirement/evidence、对抗检查、质量检查、Trellis 和 Git 事实；Trellis 的 `finished: true` 还必须对应已归档且状态完成的真实 task，其 `check.md` 必须含唯一规范 PASS marker，月份目录必须严格匹配 `YYYY-MM`，CLI/file 输入必须就是该 task 的归档 `completion.json`。validator 不会信任 receipt 内的路径扩读其他目录，也不会代替实际 Git 操作。
+- `run` 校验 canonical root/path、可移植且不会折叠为 Windows 路径别名的 run_id、时间、scope、outcomes、baseline impact、risk 与 Trellis 路由。
+- `baseline` / `run` / `receipt` 会拒绝高置信凭据，错误只报告安全字段路径，不回显 key/value。
+- `receipt` 默认只接受 schema v2；`--legacy-v1` 仅审计历史 v1，不能作为当前完成证据。v2 继续验证对抗检查、质量检查、canonical Trellis archive/check/finish 和 Git 事实。
 
-`audit` 的 readiness 与退出码固定如下；`baseline` / `receipt` 合法时返回 `0`，输入或契约非法时返回 `2`：
+`audit` 的 readiness 与退出码固定如下；`baseline` / `run` / `receipt` 合法时返回 `0`，输入或契约非法时返回 `2`：
 
 | Readiness | 退出码 | 含义 |
 | --- | --- | --- |
@@ -256,6 +262,7 @@ DXM 在目标项目根目录创建或确认：
 | `项目文件结构说明.md` | 根目录、源码目录、脚本、配置、运行态文件的职责边界 |
 | `开发者AI开发与PR提交流程.md` | Git、分支、PR、GitHub CLI、合并授权、发布、发布说明与 Latest 核验流程 |
 | `.dxm/project.json` | 仅在提供有效 `--baseline` 时持久化的本地规范化项目基线；共享链路文档使用 `$PROJECT_ROOT` / `$ABSOLUTE_PATH` 可移植投影，不保留本机绝对路径 |
+| `.dxm/runs/<run_id>/run.json` | 每个可写任务的 lightweight 目标/scope/outcome/impact/risk 锁；run-only completion 位于同目录，默认由 Git 忽略 |
 
 默认只创建缺失文件，避免覆盖人工长期维护的内容。需要升级 DXM 或 Trellis 管理块时，使用 `--refresh-blocks`，脚本只会刷新标记块内的生成内容。
 

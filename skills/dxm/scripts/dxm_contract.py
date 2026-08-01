@@ -4,20 +4,24 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import stat
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
 
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2
 CONTRACT_MARKER = f"<!-- DXM-CONTRACT:{CONTRACT_VERSION} -->"
 SCHEMA_VERSION = 1
 BASELINE_SCHEMA_VERSION = SCHEMA_VERSION
-RECEIPT_SCHEMA_VERSION = SCHEMA_VERSION
+RUN_SCHEMA_VERSION = 1
+LEGACY_RECEIPT_SCHEMA_VERSION = 1
+RECEIPT_SCHEMA_VERSION = 2
 
 ABSENT = "ABSENT"
 PARTIAL = "PARTIAL"
@@ -54,6 +58,17 @@ CHECK_PASS_MARKER = "<!-- DXM-CHECK:PASS -->"
 
 WORKFLOW_MODES = ("audit", "init", "task", "scaffold-only")
 RECEIPT_WORKFLOW_MODES = ("init", "task")
+RUN_CLAIM_TYPES = (
+    "source",
+    "documentation",
+    "behavior",
+    "service",
+    "ui",
+    "deployed",
+    "restart",
+    "release",
+)
+RUNTIME_CLAIM_TYPES = frozenset(RUN_CLAIM_TYPES) - {"source", "documentation"}
 QUALITY_CHECKS = ("docs", "encoding", "secrets", "rollback")
 STARTED_TRELLIS_STATUSES = ("in_progress", "review", "completed", "done")
 COMPLETED_TRELLIS_STATUSES = ("completed", "done")
@@ -64,6 +79,13 @@ HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 INLINE_CODE_RE = re.compile(r"(?<!`)(?P<ticks>`+)(?!`)[^\n]*?(?<!`)(?P=ticks)(?!`)")
 ARCHIVE_MONTH_RE = re.compile(r"^(?!0000)[0-9]{4}-(?:0[1-9]|1[0-2])$")
+RUN_ID_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._+-]{0,126}[A-Za-z0-9_+-])?$")
+WINDOWS_DEVICE_RUN_ID_RE = re.compile(
+    r"^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)",
+    re.IGNORECASE,
+)
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+FUTURE_TOLERANCE = timedelta(minutes=5)
 CREDENTIAL_FIELD_SUFFIXES = (
     "apikey",
     "accesstoken",
@@ -341,6 +363,14 @@ def _trusted_project_path_error(root: Path, path: Path, label: str) -> str | Non
 
 def _is_nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _valid_run_id(value: Any) -> bool:
+    return (
+        _is_nonempty_string(value)
+        and RUN_ID_RE.fullmatch(str(value)) is not None
+        and WINDOWS_DEVICE_RUN_ID_RE.match(str(value)) is None
+    )
 
 
 def _credential_field_name(key: str) -> bool:
@@ -1159,6 +1189,255 @@ def audit_project(root: Path, require_trellis: bool = False) -> AuditResult:
     return AuditResult(canonical_root, READY)
 
 
+def _parse_timestamp(value: Any, label: str, errors: list[str]) -> datetime | None:
+    if not _is_nonempty_string(value):
+        errors.append(f"{label} must be a timezone-aware ISO-8601 timestamp")
+        return None
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        errors.append(f"{label} must be a timezone-aware ISO-8601 timestamp")
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        errors.append(f"{label} must include a timezone offset")
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _project_relative_path_error(value: Any, label: str) -> str | None:
+    if not _is_nonempty_string(value):
+        return f"{label} must be a non-empty project-relative path"
+    normalized = value.replace("\\", "/")
+    if normalized.startswith("/") or re.match(r"^[A-Za-z]:", normalized):
+        return f"{label} must be project-relative"
+    parts = normalized.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return f"{label} must not contain empty, dot, or parent segments"
+    return None
+
+
+def _run_data(data_or_path: Mapping[str, Any] | Path | str) -> tuple[dict[str, Any] | None, list[str]]:
+    if isinstance(data_or_path, Mapping):
+        return dict(data_or_path), []
+    return _load_json_object(Path(data_or_path), "run")
+
+
+def _validate_baseline_impact(
+    value: Any,
+    baseline_ids: set[str],
+    outcome_ids: set[str],
+    label: str,
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    errors: list[str] = []
+    entries: dict[str, dict[str, Any]] = {}
+    if not isinstance(value, list) or not value:
+        return entries, [f"{label} must be a non-empty list"]
+    for index, item in enumerate(value):
+        prefix = f"{label}[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{prefix} must be an object")
+            continue
+        baseline_id = item.get("id")
+        if not _is_nonempty_string(baseline_id):
+            errors.append(f"{prefix}.id must be a non-empty string")
+            continue
+        if baseline_id in entries:
+            errors.append(f"duplicate baseline acceptance ID at {prefix}.id")
+            continue
+        entries[baseline_id] = item
+        allowed_fields = {"id", "status", "rationale", "outcome_ids"}
+        if any(key not in allowed_fields for key in item):
+            errors.append(f"{prefix} contains unsupported fields")
+        if baseline_id not in baseline_ids:
+            errors.append(f"{prefix}.id references an unknown baseline acceptance ID")
+        status = item.get("status")
+        if status not in ("affected", "not_affected"):
+            errors.append(f"{prefix}.status must be affected or not_affected")
+        if not _is_nonempty_string(item.get("rationale")):
+            errors.append(f"{prefix}.rationale must be a non-empty string")
+        linked = item.get("outcome_ids")
+        if status == "affected":
+            link_errors = _validate_string_list(linked, f"{prefix}.outcome_ids", allow_empty=False)
+            errors.extend(link_errors)
+            if isinstance(linked, list):
+                if len(linked) != len(set(map(str, linked))):
+                    errors.append(f"{prefix}.outcome_ids contains duplicates")
+                for outcome_id in linked:
+                    if _is_nonempty_string(outcome_id) and outcome_id not in outcome_ids:
+                        errors.append(f"{prefix}.outcome_ids references an unknown run outcome")
+        elif "outcome_ids" in item:
+            errors.append(f"{prefix}.outcome_ids must be omitted for not_affected")
+    if set(entries) != baseline_ids:
+        errors.append(f"{label} must exactly cover project baseline acceptance IDs")
+    return entries, errors
+
+
+def validate_run(
+    data_or_path: Mapping[str, Any] | Path | str,
+    expected_root: Path | None = None,
+) -> list[str]:
+    """Validate a lightweight run without trusting its declared project root."""
+
+    source: Path | None = None
+    if not isinstance(data_or_path, Mapping):
+        source = _lexical_absolute_path(data_or_path)
+        if expected_root is not None:
+            source_error = _trusted_project_path_error(Path(expected_root), source, "run")
+            if source_error is not None:
+                return [source_error]
+    data, load_errors = _run_data(data_or_path)
+    if load_errors:
+        return load_errors
+    assert data is not None
+    errors: list[str] = []
+    errors.extend(_credential_errors(data, "run"))
+
+    if type(data.get("schema_version")) is not int or data.get("schema_version") != RUN_SCHEMA_VERSION:
+        errors.append(f"schema_version must be {RUN_SCHEMA_VERSION}")
+    run_id = data.get("run_id")
+    if not _valid_run_id(run_id):
+        errors.append("run_id must be a safe non-empty identifier")
+    if data.get("workflow_mode") not in RECEIPT_WORKFLOW_MODES:
+        errors.append(f"workflow_mode must be one of: {', '.join(RECEIPT_WORKFLOW_MODES)}")
+    if not _is_nonempty_string(data.get("author")):
+        errors.append("author must be a non-empty string")
+    if not _is_nonempty_string(data.get("goal")):
+        errors.append("goal must be a non-empty string")
+
+    project_root = data.get("project_root")
+    canonical_root: Path | None = None
+    if not _is_nonempty_string(project_root) or not Path(str(project_root)).is_absolute():
+        errors.append("project_root must be a non-empty absolute path")
+    if expected_root is None:
+        errors.append("expected_root is required to verify run against trusted project state")
+    else:
+        trusted_root = _canonical_path(expected_root)
+        if _is_nonempty_string(project_root) and Path(str(project_root)).is_absolute():
+            if os.path.normcase(str(project_root)) != os.path.normcase(str(trusted_root)):
+                errors.append("project_root does not match expected_root or is not canonical")
+            else:
+                canonical_root = trusted_root
+
+    started_at = _parse_timestamp(data.get("started_at"), "started_at", errors)
+    if started_at is not None and started_at > datetime.now(timezone.utc) + FUTURE_TOLERANCE:
+        errors.append("started_at must not be materially in the future")
+
+    scope = data.get("scope")
+    if not isinstance(scope, dict):
+        errors.append("scope must be an object")
+    else:
+        paths = scope.get("paths")
+        errors.extend(_validate_string_list(paths, "scope.paths", allow_empty=False))
+        if isinstance(paths, list):
+            for index, value in enumerate(paths):
+                path_error = _project_relative_path_error(value, f"scope.paths[{index}]")
+                if path_error is not None:
+                    errors.append(path_error)
+        errors.extend(_validate_string_list(scope.get("exclusions"), "scope.exclusions", allow_empty=True))
+        errors.extend(
+            _validate_string_list(
+                scope.get("external_targets", []),
+                "scope.external_targets",
+                allow_empty=True,
+            )
+        )
+
+    outcomes = data.get("outcomes")
+    outcome_ids: set[str] = set()
+    claim_types: list[str] = []
+    if not isinstance(outcomes, list) or not outcomes:
+        errors.append("outcomes must be a non-empty list")
+    else:
+        for index, outcome in enumerate(outcomes):
+            prefix = f"outcomes[{index}]"
+            if not isinstance(outcome, dict):
+                errors.append(f"{prefix} must be an object")
+                continue
+            outcome_id = outcome.get("id")
+            if not _is_nonempty_string(outcome_id):
+                errors.append(f"{prefix}.id must be a non-empty string")
+            elif outcome_id in outcome_ids:
+                errors.append(f"duplicate outcome id at {prefix}.id")
+            else:
+                outcome_ids.add(outcome_id)
+            if not _is_nonempty_string(outcome.get("description")):
+                errors.append(f"{prefix}.description must be a non-empty string")
+            claim_type = outcome.get("claim_type")
+            if claim_type not in RUN_CLAIM_TYPES:
+                errors.append(f"{prefix}.claim_type must be one of: {', '.join(RUN_CLAIM_TYPES)}")
+            else:
+                claim_types.append(claim_type)
+            kinds = outcome.get("evidence_kinds")
+            errors.extend(_validate_string_list(kinds, f"{prefix}.evidence_kinds", allow_empty=False))
+            if isinstance(kinds, list) and len(kinds) != len(set(map(str, kinds))):
+                errors.append(f"{prefix}.evidence_kinds contains duplicates")
+
+    risk = data.get("risk")
+    review_required = False
+    if not isinstance(risk, dict):
+        errors.append("risk must be an object")
+    else:
+        level = risk.get("level")
+        if level not in ("normal", "high"):
+            errors.append("risk.level must be normal or high")
+        errors.extend(_validate_string_list(risk.get("reasons"), "risk.reasons", allow_empty=level != "high"))
+        review_required = risk.get("independent_review_required") is True
+        if not isinstance(risk.get("independent_review_required"), bool):
+            errors.append("risk.independent_review_required must be a boolean")
+        if level == "high" and not review_required:
+            errors.append("high risk requires independent_review_required true")
+        if any(claim in ("deployed", "release") for claim in claim_types) and level != "high":
+            errors.append("deployed and release claims require risk.level high")
+
+    trellis = data.get("trellis")
+    if not isinstance(trellis, dict) or not isinstance(trellis.get("required"), bool):
+        errors.append("trellis.required must be a boolean")
+    elif trellis["required"]:
+        if not _is_nonempty_string(trellis.get("task")):
+            errors.append("trellis.task must name the required task")
+    elif trellis.get("task") is not None:
+        errors.append("trellis.task must be null when Trellis is not required")
+
+    boundaries = data.get("unverified_boundaries")
+    errors.extend(_validate_string_list(boundaries, "unverified_boundaries", allow_empty=True))
+    if "source" in claim_types and (not isinstance(boundaries, list) or not boundaries):
+        errors.append("source claims require an explicit unverified_boundaries entry")
+
+    if canonical_root is not None:
+        baseline_ids: set[str] = set()
+        try:
+            baseline = load_baseline(
+                canonical_root / ".dxm" / "project.json",
+                expected_root=canonical_root,
+                require_trusted_path=True,
+            )
+        except ContractError:
+            errors.append("project baseline must be valid and match project_root")
+        else:
+            baseline_ids = {item["id"] for item in baseline["acceptance_criteria"]}
+        if baseline_ids:
+            _, impact_errors = _validate_baseline_impact(
+                data.get("baseline_impact"), baseline_ids, outcome_ids, "baseline_impact"
+            )
+            errors.extend(impact_errors)
+        if source is not None and _valid_run_id(run_id):
+            expected = canonical_root / ".dxm" / "runs" / str(run_id) / "run.json"
+            if (
+                source.parent.name != str(run_id)
+                or source.name != "run.json"
+                or not _same_path(source, expected)
+            ):
+                errors.append("run file must be .dxm/runs/<run_id>/run.json")
+        if (
+            isinstance(trellis, dict)
+            and trellis.get("required") is True
+            and _is_nonempty_string(trellis.get("task"))
+        ):
+            errors.extend(_validate_trellis_run(canonical_root, trellis))
+    return errors
+
+
 def _receipt_data(data_or_path: Mapping[str, Any] | Path | str) -> tuple[dict[str, Any] | None, list[str]]:
     if isinstance(data_or_path, Mapping):
         return dict(data_or_path), []
@@ -1245,6 +1524,35 @@ def _find_trellis_task(root: Path, task_name: str) -> tuple[Path | None, bool, l
     if task_error is not None:
         return None, False, [task_error]
     return task_dir, archived, []
+
+
+def _validate_trellis_run(root: Path, trellis: dict[str, Any]) -> list[str]:
+    task_name = trellis.get("task")
+    if not _is_nonempty_string(task_name):
+        return []
+    if task_name in (".", "..") or "/" in task_name or "\\" in task_name:
+        return ["trellis.task must be one task directory name"]
+    task_dir, archived, errors = _find_trellis_task(root, task_name)
+    if task_dir is None:
+        return errors
+    metadata = task_dir / "task.json"
+    metadata_error = _trusted_project_path_error(root, metadata, "Trellis task metadata")
+    if metadata_error is not None:
+        return [*errors, metadata_error]
+    task, load_errors = _load_json_object(metadata, "Trellis task metadata")
+    if load_errors or task is None:
+        return [*errors, "trellis.task task.json must be valid UTF-8 JSON"]
+    task_id = task.get("id")
+    if not _is_nonempty_string(task_id) or (
+        task_name != task_id and not task_name.endswith(f"-{task_id}")
+    ):
+        errors.append("trellis.task task.json id does not match its directory")
+    status = task.get("status")
+    if status not in STARTED_TRELLIS_STATUSES:
+        errors.append("trellis.task task.json does not prove the task was started")
+    if archived and status not in COMPLETED_TRELLIS_STATUSES:
+        errors.append("archived trellis.task must have completed status")
+    return errors
 
 
 def _task_ref_matches(task_ref: str, task_name: str) -> bool:
@@ -1367,7 +1675,7 @@ def _validate_trellis_receipt_path(root: Path, trellis: dict[str, Any], source: 
     return []
 
 
-def validate_receipt(
+def _validate_legacy_receipt(
     data_or_path: Mapping[str, Any] | Path | str,
     expected_root: Path | None = None,
 ) -> list[str]:
@@ -1397,8 +1705,8 @@ def validate_receipt(
     errors: list[str] = []
     errors.extend(_credential_errors(data, "receipt"))
 
-    if type(data.get("schema_version")) is not int or data.get("schema_version") != RECEIPT_SCHEMA_VERSION:
-        errors.append(f"schema_version must be {RECEIPT_SCHEMA_VERSION}")
+    if type(data.get("schema_version")) is not int or data.get("schema_version") != LEGACY_RECEIPT_SCHEMA_VERSION:
+        errors.append(f"schema_version must be {LEGACY_RECEIPT_SCHEMA_VERSION}")
     if data.get("workflow_mode") not in RECEIPT_WORKFLOW_MODES:
         errors.append(f"workflow_mode must be one of: {', '.join(RECEIPT_WORKFLOW_MODES)}")
     project_root = data.get("project_root")
@@ -1532,6 +1840,512 @@ def validate_receipt(
     return errors
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _validate_observation(
+    observation: Any,
+    *,
+    root: Path,
+    started_at: datetime,
+    label: str,
+) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(observation, dict):
+        return [f"{label} must be a structured observation"]
+    observed_at = _parse_timestamp(observation.get("observed_at"), f"{label}.observed_at", errors)
+    if observed_at is not None:
+        if observed_at < started_at:
+            errors.append(f"{label}.observed_at must not precede run.started_at")
+        if observed_at > datetime.now(timezone.utc) + FUTURE_TOLERANCE:
+            errors.append(f"{label}.observed_at must not be materially in the future")
+    for field in ("subject", "method", "summary"):
+        if not _is_nonempty_string(observation.get(field)):
+            errors.append(f"{label}.{field} must be a non-empty string")
+    if observation.get("result") != "passed":
+        errors.append(f"{label}.result must be passed")
+
+    artifact_path = observation.get("path")
+    artifact_hash = observation.get("sha256")
+    if (artifact_path is None) != (artifact_hash is None):
+        errors.append(f"{label}.path and {label}.sha256 must be provided together")
+    elif artifact_path is not None:
+        path_error = _project_relative_path_error(artifact_path, f"{label}.path")
+        if path_error is not None:
+            errors.append(path_error)
+        if not _is_nonempty_string(artifact_hash) or SHA256_RE.fullmatch(str(artifact_hash)) is None:
+            errors.append(f"{label}.sha256 must be a lowercase SHA-256 digest")
+        if path_error is None:
+            artifact = root / str(artifact_path)
+            trusted_error = _trusted_project_path_error(root, artifact, f"{label}.path")
+            if trusted_error is not None:
+                errors.append(trusted_error)
+            elif not artifact.is_file():
+                errors.append(f"{label}.path must reference an existing file")
+            elif _is_nonempty_string(artifact_hash) and SHA256_RE.fullmatch(str(artifact_hash)):
+                try:
+                    actual_hash = _sha256(artifact)
+                except OSError:
+                    errors.append(f"{label}.path must be readable")
+                else:
+                    if actual_hash != artifact_hash:
+                        errors.append(f"{label}.sha256 does not match the referenced artifact")
+
+    isolated = observation.get("isolated", False)
+    if not isinstance(isolated, bool):
+        errors.append(f"{label}.isolated must be a boolean when present")
+    elif isolated:
+        if observation.get("final_artifact") is not True:
+            errors.append(f"{label}.final_artifact must be true for isolated evidence")
+        if not _is_nonempty_string(observation.get("decisive_branch")):
+            errors.append(f"{label}.decisive_branch must identify the exercised production branch")
+    return errors
+
+
+def _validate_independent_review(
+    review: Any,
+    *,
+    root: Path,
+    run_id: Any,
+    trellis: Any,
+    author: Any,
+    started_at: datetime,
+    required: bool,
+) -> list[str]:
+    if not isinstance(review, dict):
+        return ["independent_review must be an object when required"] if required else []
+    errors: list[str] = []
+    reviewer = review.get("reviewer")
+    if not _is_nonempty_string(reviewer):
+        errors.append("independent_review.reviewer must be a non-empty string")
+    elif _is_nonempty_string(author) and reviewer.strip().casefold() == author.strip().casefold():
+        errors.append("independent_review.reviewer must be different from run.author")
+    reviewed_at = _parse_timestamp(
+        review.get("reviewed_at"), "independent_review.reviewed_at", errors
+    )
+    if reviewed_at is not None:
+        if reviewed_at < started_at:
+            errors.append("independent_review.reviewed_at must not precede run.started_at")
+        if reviewed_at > datetime.now(timezone.utc) + FUTURE_TOLERANCE:
+            errors.append("independent_review.reviewed_at must not be materially in the future")
+    if review.get("verdict") != "passed":
+        errors.append("independent_review.verdict must be passed")
+    if not _is_nonempty_string(review.get("summary")):
+        errors.append("independent_review.summary must be a non-empty string")
+
+    expected_artifact: Path | None = None
+    if isinstance(trellis, dict) and trellis.get("required") is True:
+        task_name = trellis.get("task")
+        if _is_nonempty_string(task_name):
+            task_dir, _archived, task_errors = _find_trellis_task(root, task_name)
+            errors.extend(task_errors)
+            if task_dir is not None:
+                expected_artifact = task_dir / "independent-review.md"
+    elif _valid_run_id(run_id):
+        expected_artifact = root / ".dxm" / "runs" / str(run_id) / "independent-review.md"
+
+    artifact_value = review.get("artifact")
+    artifact_hash = review.get("artifact_sha256")
+    path_error = _project_relative_path_error(artifact_value, "independent_review.artifact")
+    if path_error is not None:
+        errors.append(path_error)
+    else:
+        artifact = root / str(artifact_value)
+        if expected_artifact is None or not _same_path(artifact, expected_artifact):
+            errors.append("independent_review.artifact must be the canonical independent-review.md")
+        else:
+            trusted_error = _trusted_project_path_error(root, artifact, "independent_review.artifact")
+            if trusted_error is not None:
+                errors.append(trusted_error)
+            else:
+                try:
+                    content = artifact.read_text(encoding="utf-8")
+                except (FileNotFoundError, OSError, UnicodeDecodeError):
+                    errors.append("independent_review.artifact must be an existing UTF-8 file")
+                else:
+                    if not content.strip():
+                        errors.append("independent_review.artifact must not be empty")
+                    if not _is_nonempty_string(artifact_hash) or SHA256_RE.fullmatch(str(artifact_hash)) is None:
+                        errors.append("independent_review.artifact_sha256 must be a lowercase SHA-256 digest")
+                    else:
+                        try:
+                            actual_hash = _sha256(artifact)
+                        except OSError:
+                            errors.append("independent_review.artifact must be readable")
+                        else:
+                            if actual_hash != artifact_hash:
+                                errors.append(
+                                    "independent_review.artifact_sha256 does not match the review artifact"
+                                )
+
+                    surface = markdown_noncode_surface(content)
+                    surface = HTML_COMMENT_RE.sub(
+                        lambda match: _mask_markdown_code(match.group(0)),
+                        surface,
+                    )
+                    metadata: dict[str, str] = {}
+                    for field in ("reviewer_id", "reviewed_at", "verdict"):
+                        matches = re.findall(
+                            rf"(?m)^{re.escape(field)}:[ \t]*(\S(?:[^\r\n]*?\S)?)[ \t]*\r?$",
+                            surface,
+                        )
+                        if len(matches) != 1:
+                            errors.append(
+                                f"independent_review.artifact must contain exactly one {field} field"
+                            )
+                        else:
+                            metadata[field] = matches[0]
+
+                    artifact_reviewer = metadata.get("reviewer_id")
+                    if artifact_reviewer is not None and _is_nonempty_string(reviewer):
+                        if artifact_reviewer.strip() != reviewer.strip():
+                            errors.append(
+                                "independent_review.artifact reviewer_id must match independent_review.reviewer"
+                            )
+                    artifact_reviewed_at: datetime | None = None
+                    if "reviewed_at" in metadata:
+                        artifact_reviewed_at = _parse_timestamp(
+                            metadata["reviewed_at"],
+                            "independent_review.artifact reviewed_at",
+                            errors,
+                        )
+                    if (
+                        artifact_reviewed_at is not None
+                        and reviewed_at is not None
+                        and artifact_reviewed_at != reviewed_at
+                    ):
+                        errors.append(
+                            "independent_review.artifact reviewed_at must match independent_review.reviewed_at"
+                        )
+                    if metadata.get("verdict", "").strip().upper() != "PASS":
+                        errors.append("independent_review.artifact verdict must be PASS")
+    return errors
+
+
+def _validate_completion_project(root: Path, *, require_trellis: bool) -> list[str]:
+    audit = audit_project(root, require_trellis=require_trellis)
+    if audit.state == READY:
+        return []
+    subject = "project_root and required Trellis integration" if require_trellis else "project_root"
+    return [f"{subject} must be READY; audit reported {audit.state}"]
+
+
+def _validate_inline_receipt_path(root: Path, run_id: str, source: Path) -> list[str]:
+    source_error = _trusted_project_path_error(root, source, "completion receipt")
+    if source_error is not None:
+        return [source_error]
+    expected = root / ".dxm" / "runs" / run_id / "completion.json"
+    if not _same_path(source, expected):
+        return ["inline receipt file must be .dxm/runs/<run_id>/completion.json"]
+    return []
+
+
+def _validate_receipt_v2(
+    data_or_path: Mapping[str, Any] | Path | str,
+    expected_root: Path | None,
+) -> list[str]:
+    receipt_source: Path | None = None
+    if not isinstance(data_or_path, Mapping):
+        receipt_source = _lexical_absolute_path(data_or_path)
+        if expected_root is not None:
+            source_error = _trusted_project_path_error(
+                Path(expected_root), receipt_source, "completion receipt"
+            )
+            if source_error is not None:
+                return [source_error]
+            receipt_source = _canonical_path(receipt_source)
+    data, load_errors = _receipt_data(data_or_path)
+    if load_errors:
+        return load_errors
+    assert data is not None
+    errors: list[str] = []
+    errors.extend(_credential_errors(data, "receipt"))
+
+    if type(data.get("schema_version")) is not int or data.get("schema_version") != RECEIPT_SCHEMA_VERSION:
+        errors.append(f"schema_version must be {RECEIPT_SCHEMA_VERSION}")
+    if data.get("workflow_mode") not in RECEIPT_WORKFLOW_MODES:
+        errors.append(f"workflow_mode must be one of: {', '.join(RECEIPT_WORKFLOW_MODES)}")
+    run_id = data.get("run_id")
+    if not _valid_run_id(run_id):
+        errors.append("run_id must be a safe non-empty identifier")
+    run_sha256 = data.get("run_sha256")
+    if not _is_nonempty_string(run_sha256) or SHA256_RE.fullmatch(str(run_sha256)) is None:
+        errors.append("run_sha256 must be a lowercase SHA-256 digest")
+
+    project_root = data.get("project_root")
+    canonical_root: Path | None = None
+    if not _is_nonempty_string(project_root) or not Path(str(project_root)).is_absolute():
+        errors.append("project_root must be a non-empty absolute path")
+    if expected_root is None:
+        errors.append("expected_root is required to verify completion against trusted project state")
+    else:
+        trusted_root = _canonical_path(expected_root)
+        if _is_nonempty_string(project_root) and Path(str(project_root)).is_absolute():
+            if os.path.normcase(str(project_root)) != os.path.normcase(str(trusted_root)):
+                errors.append("project_root does not match expected_root or is not canonical")
+            else:
+                canonical_root = trusted_root
+
+    run: dict[str, Any] | None = None
+    run_outcomes: dict[str, dict[str, Any]] = {}
+    started_at: datetime | None = None
+    if canonical_root is not None and _valid_run_id(run_id):
+        run_path = canonical_root / ".dxm" / "runs" / str(run_id) / "run.json"
+        run_errors = validate_run(run_path, expected_root=canonical_root)
+        errors.extend(f"bound run: {error}" for error in run_errors)
+        run, run_load_errors = _run_data(run_path)
+        if run_load_errors:
+            if not run_errors:
+                errors.extend(f"bound run: {error}" for error in run_load_errors)
+        elif run is not None:
+            try:
+                actual_hash = _sha256(run_path)
+            except OSError:
+                errors.append("run_sha256 cannot be verified because the bound run is unreadable")
+            else:
+                if actual_hash != run_sha256:
+                    errors.append("run_sha256 does not match the canonical bound run")
+            if data.get("run_id") != run.get("run_id"):
+                errors.append("run_id must exactly match the canonical bound run")
+            if data.get("workflow_mode") != run.get("workflow_mode"):
+                errors.append("workflow_mode must match the bound run")
+            run_outcomes = {
+                outcome["id"]: outcome
+                for outcome in run.get("outcomes", [])
+                if isinstance(outcome, dict) and _is_nonempty_string(outcome.get("id"))
+            }
+            timestamp_errors: list[str] = []
+            started_at = _parse_timestamp(run.get("started_at"), "run.started_at", timestamp_errors)
+            if timestamp_errors and not run_errors:
+                errors.extend(timestamp_errors)
+
+    requirements = data.get("requirements")
+    requirement_kinds: dict[str, tuple[int, list[str]]] = {}
+    if not isinstance(requirements, list) or not requirements:
+        errors.append("requirements must be a non-empty list")
+    else:
+        seen_ids: set[str] = set()
+        for index, requirement in enumerate(requirements):
+            prefix = f"requirements[{index}]"
+            if not isinstance(requirement, dict):
+                errors.append(f"{prefix} must be an object")
+                continue
+            requirement_id = requirement.get("id")
+            if not _is_nonempty_string(requirement_id):
+                errors.append(f"{prefix}.id must be a non-empty string")
+                continue
+            if requirement_id in seen_ids:
+                errors.append(f"duplicate requirement id at {prefix}.id")
+                continue
+            seen_ids.add(requirement_id)
+            if requirement.get("status") != "passed":
+                errors.append(f"{prefix}.status must be passed")
+            kinds = requirement.get("evidence_kinds")
+            errors.extend(_validate_string_list(kinds, f"{prefix}.evidence_kinds", allow_empty=False))
+            if isinstance(kinds, list):
+                normalized = [kind for kind in kinds if _is_nonempty_string(kind)]
+                if len(normalized) != len(set(normalized)):
+                    errors.append(f"{prefix}.evidence_kinds contains duplicates")
+                requirement_kinds[requirement_id] = (index, normalized)
+
+    if run is not None:
+        if set(requirement_kinds) != set(run_outcomes):
+            errors.append("receipt requirements must exactly cover bound run outcomes")
+        for requirement_id, (index, kinds) in requirement_kinds.items():
+            outcome = run_outcomes.get(requirement_id)
+            if outcome is not None and kinds != outcome.get("evidence_kinds"):
+                errors.append(f"requirements[{index}].evidence_kinds must exactly match the bound run")
+
+    evidence = data.get("evidence")
+    if not isinstance(evidence, dict):
+        errors.append("evidence must be an object keyed by outcome ID and evidence kind")
+        evidence = {}
+    for requirement_id, (requirement_index, kinds) in requirement_kinds.items():
+        records = evidence.get(requirement_id)
+        if not isinstance(records, dict):
+            errors.append(f"evidence is missing an entry for requirements[{requirement_index}].id")
+            continue
+        outcome = run_outcomes.get(requirement_id, {})
+        runtime_sensitive = outcome.get("claim_type") in RUNTIME_CLAIM_TYPES
+        for kind_index, kind in enumerate(kinds):
+            references = records.get(kind)
+            if not isinstance(references, list) or not references:
+                errors.append(
+                    f"evidence for requirements[{requirement_index}] is missing evidence_kinds[{kind_index}]"
+                )
+                continue
+            for reference_index, reference in enumerate(references):
+                label = (
+                    f"evidence for requirements[{requirement_index}]."
+                    f"evidence_kinds[{kind_index}][{reference_index}]"
+                )
+                if runtime_sensitive:
+                    if canonical_root is None or started_at is None:
+                        if not isinstance(reference, dict):
+                            errors.append(f"{label} must be a structured observation")
+                    else:
+                        errors.extend(
+                            _validate_observation(
+                                reference,
+                                root=canonical_root,
+                                started_at=started_at,
+                                label=label,
+                            )
+                        )
+                elif not _is_nonempty_string(reference) and not isinstance(reference, dict):
+                    errors.append(f"{label} must be a non-empty reference or structured observation")
+                elif isinstance(reference, dict) and canonical_root is not None and started_at is not None:
+                    errors.extend(
+                        _validate_observation(
+                            reference,
+                            root=canonical_root,
+                            started_at=started_at,
+                            label=label,
+                        )
+                    )
+        for kind in records:
+            if kind not in kinds:
+                errors.append(
+                    f"evidence for requirements[{requirement_index}] references an undeclared evidence kind"
+                )
+    for outcome_id in evidence:
+        if outcome_id not in requirement_kinds:
+            errors.append("evidence references an unknown run outcome ID")
+
+    if run is not None:
+        if data.get("baseline_impact") != run.get("baseline_impact"):
+            errors.append("baseline_impact must exactly match the bound run")
+        boundaries = data.get("unverified_boundaries")
+        errors.extend(_validate_string_list(boundaries, "unverified_boundaries", allow_empty=True))
+        if boundaries != run.get("unverified_boundaries"):
+            errors.append("unverified_boundaries must exactly match the bound run")
+
+    adversarial = data.get("adversarial_check")
+    if not isinstance(adversarial, dict):
+        errors.append("adversarial_check must be an object")
+    else:
+        if adversarial.get("passed") is not True:
+            errors.append("adversarial_check.passed must be true")
+        if not _is_nonempty_string(adversarial.get("summary")):
+            errors.append("adversarial_check.summary must be a non-empty string")
+
+    quality = data.get("quality_checks")
+    if not isinstance(quality, dict):
+        errors.append("quality_checks must be an object")
+    else:
+        for name in QUALITY_CHECKS:
+            if quality.get(name) is not True:
+                errors.append(f"quality_checks.{name} must be true")
+
+    trellis = data.get("trellis")
+    require_trellis = False
+    if not isinstance(trellis, dict) or not isinstance(trellis.get("required"), bool):
+        errors.append("trellis.required must be a boolean")
+    else:
+        require_trellis = trellis["required"]
+        if require_trellis:
+            if not _is_nonempty_string(trellis.get("task")):
+                errors.append("trellis.task must name the required task")
+            if trellis.get("check_passed") is not True:
+                errors.append("trellis.check_passed must be true when Trellis is required")
+            if trellis.get("finished") is not True:
+                errors.append("trellis.finished must be true when Trellis is required")
+        else:
+            if trellis.get("task") is not None:
+                errors.append("trellis.task must be null when Trellis is not required")
+            if trellis.get("finished") is True or trellis.get("check_passed") is True:
+                errors.append("trellis cannot claim check/finish completion when required is false")
+        if run is not None:
+            run_trellis = run.get("trellis")
+            if not isinstance(run_trellis, dict) or (
+                trellis.get("required") != run_trellis.get("required")
+                or trellis.get("task") != run_trellis.get("task")
+            ):
+                errors.append("trellis required/task must exactly match the bound run")
+
+    git = data.get("git")
+    if not isinstance(git, dict):
+        errors.append("git must be an object")
+    else:
+        commit_performed = git.get("commit_performed")
+        push_performed = git.get("push_performed")
+        if not isinstance(commit_performed, bool):
+            errors.append("git.commit_performed must be a boolean")
+        elif commit_performed and not _is_nonempty_string(git.get("commit")):
+            errors.append("git.commit must be present when commit_performed is true")
+        elif not commit_performed and git.get("commit") is not None:
+            errors.append("git.commit must be null when commit_performed is false")
+        if not isinstance(push_performed, bool):
+            errors.append("git.push_performed must be a boolean")
+        elif push_performed and not _is_nonempty_string(git.get("branch")):
+            errors.append("git.branch must be present when push_performed is true")
+        elif not push_performed and git.get("branch") is not None:
+            errors.append("git.branch must be null when push_performed is false")
+
+    if canonical_root is not None:
+        errors.extend(_validate_completion_project(canonical_root, require_trellis=require_trellis))
+        if require_trellis and isinstance(trellis, dict):
+            errors.extend(_validate_trellis_receipt(canonical_root, trellis))
+            if receipt_source is not None:
+                errors.extend(_validate_trellis_receipt_path(canonical_root, trellis, receipt_source))
+        elif receipt_source is not None and _valid_run_id(run_id):
+            errors.extend(_validate_inline_receipt_path(canonical_root, str(run_id), receipt_source))
+
+        if run is not None and started_at is not None:
+            risk = run.get("risk")
+            review_required = isinstance(risk, dict) and risk.get("independent_review_required") is True
+            review = data.get("independent_review")
+            errors.extend(
+                _validate_independent_review(
+                    review,
+                    root=canonical_root,
+                    run_id=run.get("run_id"),
+                    trellis=run.get("trellis"),
+                    author=run.get("author"),
+                    started_at=started_at,
+                    required=review_required,
+                )
+            )
+    return errors
+
+
+def validate_receipt(
+    data_or_path: Mapping[str, Any] | Path | str,
+    expected_root: Path | None = None,
+    *,
+    allow_legacy: bool = False,
+) -> list[str]:
+    """Validate current receipt v2, or explicitly audit a historical v1 receipt."""
+
+    if not isinstance(data_or_path, Mapping) and expected_root is not None:
+        source = _lexical_absolute_path(data_or_path)
+        source_error = _trusted_project_path_error(Path(expected_root), source, "completion receipt")
+        if source_error is not None:
+            return [source_error]
+    data, load_errors = _receipt_data(data_or_path)
+    if load_errors:
+        return load_errors
+    assert data is not None
+    schema = data.get("schema_version")
+    if allow_legacy and (type(schema) is not int or schema != LEGACY_RECEIPT_SCHEMA_VERSION):
+        return ["legacy audit requires a schema_version 1 receipt"]
+    if type(schema) is int and schema == LEGACY_RECEIPT_SCHEMA_VERSION:
+        if not allow_legacy:
+            return [
+                "schema_version 1 is a legacy audit format and cannot prove current completion; "
+                "use receipt --legacy-v1 only for historical inspection"
+            ]
+        return _validate_legacy_receipt(data_or_path, expected_root=expected_root)
+    if type(schema) is not int or schema != RECEIPT_SCHEMA_VERSION:
+        return [f"schema_version must be {RECEIPT_SCHEMA_VERSION}"]
+    return _validate_receipt_v2(data_or_path, expected_root)
+
+
 def release_version() -> str:
     """Return the repository release version when packaged alongside the repo."""
 
@@ -1551,5 +2365,6 @@ def version_text() -> str:
     return (
         f"dxm-validator {release_version()} "
         f"contract={CONTRACT_VERSION} "
-        f"baseline-schema={BASELINE_SCHEMA_VERSION} receipt-schema={RECEIPT_SCHEMA_VERSION}"
+        f"baseline-schema={BASELINE_SCHEMA_VERSION} run-schema={RUN_SCHEMA_VERSION} "
+        f"receipt-schema={RECEIPT_SCHEMA_VERSION}"
     )

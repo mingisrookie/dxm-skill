@@ -8,7 +8,7 @@
 
 <!-- DXM-DOC-RULES:START -->
 
-<!-- DXM-CONTRACT:1 -->
+<!-- DXM-CONTRACT:2 -->
 
 ## DXM 文档维护规则
 
@@ -94,12 +94,14 @@ python skills/dxm/scripts/validate_dxm.py audit --root . --require-trellis
 
 Trellis 是中大型任务记忆层，不替代 DXM。
 
-- 小修、只读排查、单点 bug、轻量文档调整：默认 DXM inline，不建 Trellis task。
+- 小修、只读排查、单点 bug、轻量文档调整：默认 DXM inline **run-only**，建 lightweight run 但不强制 Trellis task。
 - 新功能、多模块、架构变化、跨文件重构、长周期任务：完成有界 project-grill 后建议一次 Trellis；用户请求已经批准时可创建 task。
 - Trellis PRD 必须写入 `.trellis/tasks/<task>/prd.md`；不能只依赖聊天上下文。
 - create/start/check/finish 状态必须真实；显式 Trellis 请求遇到 CLI 缺失、超时或失败时，普通 DXM 文件可以已生成，但 DXM + Trellis 整体不得报告成功。
 - 每次 Trellis 任务进入 finish/handoff 前必须执行对抗性检查；检查需求偏差、隐藏假设、负路径、架构边界、测试、文档、敏感信息、乱码和回滚/恢复。存在阻断问题时回到 implement/check，不得 finish。
 - Trellis 不能自动 stage、commit、push 或创建/合并 PR；Git 操作必须得到用户明确授权。
+
+每个可写 `task` 在首次实现写入前创建 `.dxm/runs/<run_id>/run.json` 并执行 `validate_dxm.py run --root "<project-root>" --file .dxm/runs/<run_id>/run.json`；`init` 在 baseline 验证落盘后、实现工作前创建。run 记录原始 goal、scope、outcomes、`claim_type`、`evidence_kinds`、`baseline_impact`、risk、Trellis 路由和 `unverified_boundaries`。明确小修不因这个门变成 Trellis；只有歧义会改变安全动作、范围或验收时才问单批 0–3 个关键问题。
 
 ### 0.5 发布 / Release 完成面
 
@@ -194,7 +196,7 @@ Trellis 是中大型任务记忆层，不替代 DXM。
 
 ### 3.3 evidence matrix（声明与证据矩阵）
 
-基线中的每条验收标准必须使用稳定的 `acceptance_criteria[].id`，并通过 `acceptance_criteria[].evidence_kinds` 声明所需证据；PRD 采用同一组 ID。最低证据按声明类型确定：
+基线中的每条验收标准使用稳定 `acceptance_criteria[].id` 与 `acceptance_criteria[].evidence_kinds` 维护长期不变量；本次 run outcomes 用自己的稳定 ID、`claim_type` 和 `evidence_kinds` 定义任务交付。`baseline_impact` 精确覆盖每个 baseline ID：`affected` 绑定 outcome ID，`not_affected` 写理由；不能用旧证据把未触及项填成当前 passed。最低证据按声明类型确定：
 
 | 声明 | 必须提供的证据 |
 | --- | --- |
@@ -204,6 +206,10 @@ Trellis 是中大型任务记忆层，不替代 DXM。
 | `restart durability` | 实际 `restart/recovery` 验证 |
 
 单元测试、源码阅读或配置检查只能作为辅助证据，不能单独证明运行态、UI、上线或重启持久性声明。验收项没有所需证据时保持未完成。
+
+交付层级必须从用户任务推导：`修复/启用/生效/正常运行` 等行为目标要求运行态证据；明确 **source-only** 的任务可以只交源码，但必须记录 `unverified_boundaries`，且不得宣称已生效、已部署或线上已修复。拿不到原始目标所需证据时报告 partial/blocked，不得静默缩小目标。
+
+运行态 evidence kind 至少记录一个 **structured observation**：`observed_at`、`subject`、`method`、`result`、`summary`；项目内 artifact 可带 `path` + `sha256`。isolated 证据必须额外写 `final_artifact: true` 和 `decisive_branch`，单纯进程/窗口启动不算 E2E。release/deploy/live-data/multi-module architecture 等高风险任务必须设置 `independent_review_required: true`，并由不同 Agent 产出新鲜 `independent_review` PASS；回执还必须用 `artifact_sha256` 绑定 task/run 目录的 canonical `independent-review.md`，文件顶层 `reviewer_id`、带时区 `reviewed_at`、`verdict: PASS` 与回执一致。普通小修不强制。
 
 ## 4. 文档更新规范
 
@@ -232,7 +238,8 @@ Trellis 是中大型任务记忆层，不替代 DXM。
 7. 我有没有新增不必要的兼容分支、兜底分支或旧逻辑？
 8. 如果本次涉及发布，我是否同步了版本号、`CHANGELOG.md`、tag、GitHub Release、Latest、中文更新日志、对比链接和验证证据？
 9. 我有没有保护敏感文件，不回显真实 token、密码、API Key 或账号明细？
-10. 如果本次是 Trellis 任务，我是否核对了 create/start/check/finish 真实状态，并在 finish 前执行对抗性检查、处理阻断发现？
+10. 我是否在实现写入前建立 run，并按原始目标选择证据层级，而不是用源码/单测替代运行态？
+11. 如果本次是 Trellis 任务，我是否核对了 create/start/check/finish 真实状态，并在 finish 前执行对抗性检查、处理阻断发现？
 
 ## 7. 完成标准
 
@@ -241,7 +248,7 @@ Trellis 是中大型任务记忆层，不替代 DXM。
 - 代码职责边界清晰。
 - 新旧功能链路完整。
 - 开发清单各阶段已逐项完成并自检。
-- 每个 acceptance ID 都有 evidence matrix 要求的证据，关键路径及原始症状已验证。
+- run outcomes 都有 evidence matrix 要求的证据，关键路径及原始症状已验证；baseline impact 无遗漏或伪 passed。
 - 根目录长期文档已同步。
 - 没有可见乱码。
 - Trellis 任务的对抗性检查已完成，且没有未处理阻断问题。
@@ -250,25 +257,28 @@ Trellis 是中大型任务记忆层，不替代 DXM。
 
 ## 8. completion receipt 与最终回执
 
-`init` 或 `task` 声称完成前必须生成 `schema_version: 1` 的机器可读 completion receipt，并使用 DXM validator 校验。Trellis 任务必须先通过对抗检查，把最终 `check.md` 的文件首个非空行写成顶格独立的 `<!-- DXM-CHECK:PASS -->`，确保该片段全文只出现一次且不存在其他或未闭合 `DXM-CHECK` 片段；执行 `finish`，再执行 `task.py archive <task> --no-commit`。只有归档完成后，才在 `.trellis/tasks/archive/<YYYY-MM>/<task>/completion.json` 生成回执并执行：
+`init` 或 `task` 声称完成前必须生成 `schema_version: 2` 的机器可读 completion receipt，并使用 DXM validator 校验。run-only 任务把回执写在 `.dxm/runs/<run_id>/completion.json`。Trellis 任务必须先通过对抗检查，把最终 `check.md` 的文件首个非空行写成顶格独立的 `<!-- DXM-CHECK:PASS -->`，确保该片段全文只出现一次且不存在其他或未闭合 `DXM-CHECK` 片段；执行 `finish`，再执行 `task.py archive <task> --no-commit`。只有归档完成后，才在 `.trellis/tasks/archive/<YYYY-MM>/<task>/completion.json` 生成回执并执行：
 
 ```text
 python "<skill-dir>/scripts/validate_dxm.py" receipt --root "<project-root>" --file .trellis/tasks/archive/<YYYY-MM>/<task>/completion.json
 ```
 
-普通 `finish` 不等于可审计的完成事实；归档前不得预写 `finished: true`。归档必须携带 `--no-commit`，避免 Trellis 默认行为绕过用户的 Git 授权边界。CLI/file 校验必须确认输入就是归档 task 的真实 `completion.json`，且归档月份目录严格匹配 `YYYY-MM`；baseline/receipt 会规范化 credential-like key 并向嵌套容器传播检查，凭据上下文只允许显式 env 引用或白名单脱敏占位，错误只报安全字段路径且不得回显凭据。
+普通 `finish` 不等于可审计的完成事实；归档前不得预写 `finished: true`。归档必须携带 `--no-commit`，避免 Trellis 默认行为绕过用户的 Git 授权边界。CLI/file 校验必须确认输入就是归档 task 的真实 `completion.json`，且归档月份目录严格匹配 `YYYY-MM`；baseline/run/receipt 会规范化 credential-like key 并向嵌套容器传播检查，凭据上下文只允许显式 env 引用或白名单脱敏占位，错误只报安全字段路径且不得回显凭据。
 
 schema 必须与 validator 一致：
 
+- `run_id` 与 `run_sha256` 绑定 `.dxm/runs/<run_id>/run.json`；默认拒绝 legacy v1，`--legacy-v1` 仅供历史审计；
 - `workflow_mode` 与 `project_root`，后者必须是 root/mode/scope lock 的规范化根目录；
-- `requirements[]` 中每项的 `id`、`status`（完成时为 `passed`）和 `evidence_kinds`；
+- `requirements[]` 精确覆盖 run outcomes，每项包含 `id`、`status`（完成时为 `passed`）和 `evidence_kinds`；
 - `evidence` 按 requirement ID、kind 映射到安全证据引用列表；
+- `baseline_impact` 与 `unverified_boundaries` 必须和 bound run 一致；
+- 高风险任务提供不同 Agent 的 `independent_review` PASS，并 hash-bind canonical `independent-review.md`；
 - `adversarial_check.passed` 与摘要；
 - `quality_checks` 下的 `docs`、`encoding`、`secrets`、`rollback` 布尔结果；
 - `trellis.required`，以及适用时的 `task`、`check_passed`、`finished` 真实状态；
 - `git.commit_performed` / `commit` 和 `push_performed` / `branch` 真实状态；只记录事实，不得自动执行 Git 操作。
 
-缺需求、缺证据、对抗检查失败、`check.md` 缺失/非 PASS/格式不合法、非规范月份目录、可信 root 不一致、高置信凭据或虚假 Trellis 完成状态时，validator 必须拒绝。scope 由任务锁、diff 审查和对抗检查单独执行；发现扩范围同样回到 implement/check，但不得伪称为 receipt schema 字段。
+缺需求、缺证据、observation 陈旧/失败、run/hash/outcome/impact 漂移、artifact 越界或哈希错误、缺独立审查、对抗检查失败、`check.md` 缺失/非 PASS/格式不合法、非规范月份目录、可信 root 不一致、高置信凭据或虚假 Trellis 完成状态时，validator 必须拒绝。
 
 最终人类回执只能忠实摘要已验证的 completion receipt，并简明说明：
 
@@ -289,12 +299,12 @@ Trellis 只用于中大型开发任务的 PRD、任务状态和检查沉淀。�
 | 场景 | 默认处理 |
 | --- | --- |
 | 只分析 / 先看看 | 只读，不建 task |
-| 小修 / 单点 bug / 单文件文档调整 | DXM inline，不建 task |
+| 小修 / 单点 bug / 单文件文档调整 | DXM inline run-only，建 lightweight run，不建 task |
 | 新功能 / 多模块 / 架构 / 跨文件 / 长周期 | DXM core 有界 project-grill；获准后建 Trellis task |
 | 需求不清楚但会继续开发 | 先查本地证据并单批问 0–3 个阻塞问题；匹配时可用有界 `grill-with-docs`，full `grilling` 仅 explicit opt-in |
 | 用户明确 scaffold only / 先别问 | 只 scaffold，不 grill，不建 task |
 
 启用 Trellis 时必须保持 `session_auto_commit: false`，并遵守本项目 Git/PR 授权规则。
-每次需求澄清先从第一性原理出发并质疑隐藏假设，本地证据优先、单批 0–3 个阻塞问题；每次 Trellis 任务完成后先做对抗性检查，再按 `finish` → `archive <task> --no-commit` → 归档回执校验收口。
+每个可写 task 先建 `.dxm/runs/<run_id>/run.json`；source-only 写 `unverified_boundaries`，运行态使用 fresh structured observation，high-risk 需要 `independent_review`。Trellis 最后按 `finish` → `archive <task> --no-commit` → schema_version: 2 归档回执校验收口。
 
 <!-- DXM-TRELLIS:END -->

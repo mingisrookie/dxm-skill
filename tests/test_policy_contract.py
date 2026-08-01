@@ -180,11 +180,25 @@ class PolicyContractTest(unittest.TestCase):
             self.dev,
             (
                 "schema_version",
+                "schema_version: 2",
+                ".dxm/runs/<run_id>/run.json",
+                "run_id",
+                "run_sha256",
                 "workflow_mode",
                 "project_root",
                 "requirements",
                 "evidence_kinds",
                 "evidence",
+                "baseline_impact",
+                "affected",
+                "not_affected",
+                "unverified_boundaries",
+                "independent_review",
+                "independent-review.md",
+                "artifact_sha256",
+                "reviewer_id",
+                "reviewed_at",
+                "verdict: PASS",
                 "adversarial_check",
                 "quality_checks",
                 "docs",
@@ -221,6 +235,34 @@ class PolicyContractTest(unittest.TestCase):
                 text,
                 f"{source} still points the final receipt at an active task",
             )
+            self.assertIn(".dxm/runs/<run_id>/run.json", text, source)
+            self.assertIn("schema_version: 2", text, source)
+            self.assertIn("baseline_impact", text, source)
+            self.assertIn("not_affected", text, source)
+            self.assertIn("independent_review", text, source)
+            self.assertIn("independent-review.md", text, source)
+            self.assertIn("artifact_sha256", text, source)
+            self.assertIn("reviewer_id", text, source)
+            self.assertIn("reviewed_at", text, source)
+            self.assertIn("verdict: PASS", text, source)
+
+    def test_writable_tasks_use_lightweight_runs_and_task_driven_evidence(self) -> None:
+        for source, text in {
+            "DXM skill": self.dxm,
+            "AGENTS template": self.agents,
+            "development template": self.dev,
+            "DXM method": self.method,
+        }.items():
+            lowered = text.lower()
+            self.assertIn("run-only", lowered, source)
+            self.assertIn("source-only", lowered, source)
+            self.assertIn("unverified_boundaries", text, source)
+            self.assertIn("structured observation", lowered, source)
+            self.assertIn("observed_at", text, source)
+            self.assertIn("decisive_branch", text, source)
+            self.assertIn("independent_review", text, source)
+            self.assertIn("artifact_sha256", text, source)
+            self.assertNotIn("all baseline acceptance criteria must pass again", lowered, source)
 
     def test_long_term_docs_are_loaded_selectively(self) -> None:
         for source, text in {

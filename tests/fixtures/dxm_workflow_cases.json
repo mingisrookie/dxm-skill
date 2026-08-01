@@ -200,6 +200,48 @@
       }
     },
     {
+      "id": "partial-continue-development",
+      "coverage": "partial_continue",
+      "input": {
+        "request": "继续开发这个项目；DXM 文档已存在，但 readiness 审计报告 PARTIAL。",
+        "root_flavor": "posix",
+        "canonical_root": "/workspace/synthetic-project-golf",
+        "observed_root": "/workspace/synthetic-project-golf",
+        "local_evidence": [
+          "DXM document set exists",
+          "readiness audit reports PARTIAL with listed gaps",
+          "persisted baseline matches the canonical root"
+        ]
+      },
+      "expected": {
+        "mode": "task",
+        "readiness": "PARTIAL",
+        "phase": "scope_locked",
+        "write_allowed": true,
+        "scope": [
+          "canonical_root",
+          "task_scope",
+          "readiness_gap_backlog"
+        ],
+        "question_budget": 0,
+        "local_evidence_first": true,
+        "evidence_gate": {
+          "required": [
+            "mode_lock",
+            "canonical_root_check",
+            "readiness_gap_backlog"
+          ],
+          "insufficient_alone": [
+            "document_presence_only"
+          ]
+        },
+        "forbidden_actions": [
+          "rerun_initialization",
+          "report_READY"
+        ]
+      }
+    },
+    {
       "id": "service-completion-gate",
       "coverage": "live_service_gate",
       "input": {
@@ -278,6 +320,128 @@
         "forbidden_actions": [
           "claim_complete_without_rendered_evidence",
           "claim_complete_without_interaction_evidence"
+        ]
+      }
+    },
+    {
+      "id": "small-fix-lightweight-run",
+      "coverage": "small_run",
+      "input": {
+        "request": "修复一个边界条件并运行最小相关检查；任务范围已经明确。",
+        "root_flavor": "posix",
+        "canonical_root": "/workspace/synthetic-project-hotel",
+        "observed_root": "/workspace/synthetic-project-hotel",
+        "local_evidence": [
+          "one module owns the failing branch",
+          "a focused test command is available"
+        ]
+      },
+      "expected": {
+        "mode": "task",
+        "readiness": "READY",
+        "phase": "scope_locked",
+        "write_allowed": true,
+        "scope": [
+          "canonical_root",
+          "lightweight_run",
+          "single_fix_surface"
+        ],
+        "question_budget": 0,
+        "local_evidence_first": true,
+        "evidence_gate": {
+          "required": [
+            "lightweight_run",
+            "focused_validation"
+          ],
+          "insufficient_alone": [
+            "source_diff_only"
+          ]
+        },
+        "forbidden_actions": [
+          "force_trellis_task",
+          "expand_scope_without_approval"
+        ]
+      }
+    },
+    {
+      "id": "explicit-source-only-boundary",
+      "coverage": "source_only",
+      "input": {
+        "request": "只修改源码和单测，不启动服务，也不要声称线上已生效。",
+        "root_flavor": "posix",
+        "canonical_root": "/workspace/synthetic-project-india",
+        "observed_root": "/workspace/synthetic-project-india",
+        "local_evidence": [
+          "the user explicitly limits delivery to source",
+          "runtime execution is excluded"
+        ]
+      },
+      "expected": {
+        "mode": "task",
+        "readiness": "READY",
+        "phase": "evidence_required",
+        "write_allowed": true,
+        "scope": [
+          "source",
+          "unit_tests"
+        ],
+        "question_budget": 0,
+        "local_evidence_first": true,
+        "evidence_gate": {
+          "required": [
+            "source_change",
+            "unverified_boundaries"
+          ],
+          "insufficient_alone": [
+            "runtime_observation"
+          ]
+        },
+        "forbidden_actions": [
+          "claim_runtime_complete",
+          "claim_deployed"
+        ]
+      }
+    },
+    {
+      "id": "high-risk-independent-review",
+      "coverage": "high_risk_review",
+      "input": {
+        "request": "修改发布和部署完成门，完成前做独立复核。",
+        "root_flavor": "posix",
+        "canonical_root": "/workspace/synthetic-project-juliet",
+        "observed_root": "/workspace/synthetic-project-juliet",
+        "local_evidence": [
+          "the change affects release governance",
+          "multiple policy and validator layers are involved"
+        ]
+      },
+      "expected": {
+        "mode": "task",
+        "readiness": "READY",
+        "phase": "evidence_required",
+        "write_allowed": true,
+        "scope": [
+          "release_gate",
+          "validator_contract"
+        ],
+        "question_budget": 0,
+        "local_evidence_first": true,
+        "evidence_gate": {
+          "required": [
+            "independent_review",
+            "canonical_independent_review_artifact",
+            "review_artifact_sha256",
+            "fresh_structured_observation"
+          ],
+          "insufficient_alone": [
+            "self_review_only",
+            "historical_receipt"
+          ]
+        },
+        "forbidden_actions": [
+          "self_approve_high_risk_completion",
+          "reuse_unrelated_review_artifact",
+          "reuse_stale_evidence"
         ]
       }
     }

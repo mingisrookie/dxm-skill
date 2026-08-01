@@ -206,7 +206,7 @@ class DocSyncTest(unittest.TestCase):
         self.assertIn("$dxm", interface["default_prompt"])
 
     def test_all_generated_core_docs_embed_current_contract_marker(self) -> None:
-        marker = "<!-- DXM-CONTRACT:1 -->"
+        marker = "<!-- DXM-CONTRACT:2 -->"
         template_dir = REPO_ROOT / "skills" / "dxm" / "assets" / "templates"
         for template in sorted(template_dir.glob("*.template")):
             content = template.read_text(encoding="utf-8")
@@ -231,10 +231,12 @@ class DocSyncTest(unittest.TestCase):
     def test_readme_documents_persisted_contract_and_validator_cli(self) -> None:
         for expected in (
             ".dxm/project.json",
+            ".dxm/runs/<run_id>/run.json",
             "<!-- DXM-CHECK:PASS -->",
             "--baseline <baseline.json>",
             "validate_dxm.py audit --root /path/to/project --json",
             "validate_dxm.py baseline --file /path/to/baseline.json --json",
+            "validate_dxm.py run --root /path/to/project --file .dxm/runs/<run_id>/run.json --json",
             "task.py archive <task> --no-commit",
             "validate_dxm.py receipt --root /path/to/project --file .trellis/tasks/archive/<YYYY-MM>/<task>/completion.json --json",
             "| `READY` | `0` |",
@@ -244,6 +246,7 @@ class DocSyncTest(unittest.TestCase):
             'Copy-Item -Recurse -LiteralPath "skills/dxm" -Destination $core',
             'python "$core/scripts/scaffold_dxm.py" --self-test',
             'python "$core/scripts/validate_dxm.py" --version',
+            "receipt-schema=2",
         ):
             self.assertIn(expected, self.readme_text)
 

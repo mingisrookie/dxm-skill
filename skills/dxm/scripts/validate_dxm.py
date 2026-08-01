@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Read-only CLI for DXM baseline, readiness, and completion validation."""
+"""Read-only CLI for DXM baseline, run, readiness, and completion validation."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from dxm_contract import (
     audit_project,
     load_baseline,
     validate_receipt,
+    validate_run,
     version_text,
 )
 
@@ -76,8 +77,19 @@ def _baseline(args: argparse.Namespace) -> int:
 
 def _receipt(args: argparse.Namespace) -> int:
     path = Path(args.file)
-    errors = validate_receipt(path, expected_root=Path(args.root))
-    _print_validation("receipt", path, errors, args.json)
+    errors = validate_receipt(
+        path,
+        expected_root=Path(args.root),
+        allow_legacy=args.legacy_v1,
+    )
+    _print_validation("legacy-receipt" if args.legacy_v1 else "receipt", path, errors, args.json)
+    return EXIT_INVALID if errors else EXIT_OK
+
+
+def _run(args: argparse.Namespace) -> int:
+    path = Path(args.file)
+    errors = validate_run(path, expected_root=Path(args.root))
+    _print_validation("run", path, errors, args.json)
     return EXIT_INVALID if errors else EXIT_OK
 
 
@@ -97,10 +109,21 @@ def build_parser() -> argparse.ArgumentParser:
     baseline.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     baseline.set_defaults(handler=_baseline)
 
+    run = subparsers.add_parser("run", help="validate a lightweight task run JSON file")
+    run.add_argument("--root", required=True, help="trusted project root used to verify run scope")
+    run.add_argument("--file", required=True, help="canonical .dxm/runs/<run_id>/run.json file")
+    run.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    run.set_defaults(handler=_run)
+
     receipt = subparsers.add_parser("receipt", help="validate a completion receipt JSON file")
     receipt.add_argument("--root", required=True, help="trusted project root used to verify receipt claims")
     receipt.add_argument("--file", required=True, help="completion receipt JSON file")
     receipt.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    receipt.add_argument(
+        "--legacy-v1",
+        action="store_true",
+        help="audit a historical schema v1 receipt; never treats it as a current v2 completion",
+    )
     receipt.set_defaults(handler=_receipt)
     return parser
 

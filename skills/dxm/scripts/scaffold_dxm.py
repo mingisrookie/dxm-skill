@@ -171,12 +171,12 @@ TRELLIS_AGENTS_BLOCK = f"""{TRELLIS_BLOCK_START}
 
 Trellis 是 DXM 下面的中大型任务持久层，不替代本目录长期文档。
 
-- 小修、只读排查、单点 bug、轻量文档调整：默认按 DXM inline 处理，不强制创建 Trellis task。
+- 小修、只读排查、单点 bug、轻量文档调整：默认按 DXM inline **run-only** 处理，创建 `.dxm/runs/<run_id>/run.json`，不强制 Trellis task。
 - 新功能、架构变化、跨多文件重构、长周期任务：先用 DXM core 做本地证据优先、单批 0–3 个阻塞问题的有界 project-grill；用户已批准 Trellis 时，再把结论落到 `.trellis/tasks/<task>/prd.md`。
 - `grill-with-docs` 可在已安装且任务描述匹配时用于已有代码/文档的有界查证，但仍必须遵守单批 0–3 个阻塞问题；full `grilling` / legacy `grill-me` 只有用户 explicit opt-in 完整/穷举澄清时才调用。它们都不是 Trellis 硬依赖。
 - 提问前从第一性原理判断真实目标、硬约束、本地可查事实和仍阻塞的问题，并质疑隐藏假设、过度方案、伪约束和用户给出的实现偏置；本地可查事实不得反问。
 - 用户明确说 `scaffold only`、`先别问`、`只分析` 时，不进入 Trellis，不擅自改文件。
-- 每次 Trellis 任务完成前必须执行对抗性检查；发现阻断问题就回到 implement/check。通过后把最终 `check.md` 的文件首个非空行写成顶格独立且全文唯一的 `<!-- DXM-CHECK:PASS -->`，不得存在其他或未闭合 `DXM-CHECK` 片段，再按 `finish` → `archive <task> --no-commit` → 归档目录 completion receipt 校验收口。
+- 每次 Trellis 任务完成前必须执行对抗性检查；high-risk 还要不同 Agent 的 canonical `independent-review.md` PASS，并由 receipt 绑定其 `artifact_sha256` 与 reviewer/time/PASS 元数据。通过后把最终 `check.md` 的文件首个非空行写成顶格独立且全文唯一的 `<!-- DXM-CHECK:PASS -->`，再按 `finish` → `archive <task> --no-commit` → schema_version: 2 completion receipt 收口。
 - Trellis 不得自动 stage/commit/push/PR；提交和推送仍需用户明确授权。
 
 {TRELLIS_BLOCK_END}
@@ -191,13 +191,13 @@ Trellis 只用于中大型开发任务的 PRD、任务状态和检查沉淀。�
 | 场景 | 默认处理 |
 | --- | --- |
 | 只分析 / 先看看 | 只读，不建 task |
-| 小修 / 单点 bug / 单文件文档调整 | DXM inline，不建 task |
+| 小修 / 单点 bug / 单文件文档调整 | DXM inline run-only，建 lightweight run，不建 task |
 | 新功能 / 多模块 / 架构 / 跨文件 / 长周期 | DXM core 有界 project-grill；获准后建 Trellis task |
 | 需求不清楚但会继续开发 | 先查本地证据并单批问 0–3 个阻塞问题；匹配时可用有界 `grill-with-docs`，full `grilling` 仅 explicit opt-in |
 | 用户明确 scaffold only / 先别问 | 只 scaffold，不 grill，不建 task |
 
 启用 Trellis 时必须保持 `session_auto_commit: false`，并遵守本项目 Git/PR 授权规则。
-每次需求澄清先从第一性原理出发并质疑隐藏假设，本地证据优先、单批 0–3 个阻塞问题；每次 Trellis 任务完成后先做对抗性检查，最终 `check.md` 的文件首个非空行必须是顶格独立且全文唯一的 `<!-- DXM-CHECK:PASS -->`，不得存在其他或未闭合 `DXM-CHECK` 片段，再按 `finish` → `archive <task> --no-commit` → 归档回执校验收口。
+每个可写 task 先建 `.dxm/runs/<run_id>/run.json`；source-only 必须记录 `unverified_boundaries`。运行态声明用带 `observed_at` 的 structured observation；high-risk 要 hash-bound canonical `independent-review.md`。Trellis 最后按 `finish` → `archive <task> --no-commit` → schema_version: 2 归档回执收口。
 
 {TRELLIS_BLOCK_END}
 """
@@ -209,6 +209,7 @@ TRELLIS_FILE_STRUCTURE_BLOCK = f"""{TRELLIS_BLOCK_START}
 本项目启用 Trellis/Codex 大开发工作流时，下列目录属于项目级 AI 协作基础设施：
 
 - `.trellis/`：Trellis 项目工作流状态、任务 PRD、spec、workspace journal 和脚本。
+- `.dxm/runs/`：可写任务的 lightweight run、任务 outcome/impact 边界、inline completion receipt 和适用时的 canonical `independent-review.md`；默认由项目忽略，不作为发布产物。
 - `.trellis/tasks/`：每个开发任务的 `task.json`、`prd.md`、实现上下文和检查上下文。
 - `.trellis/spec/`：可复用项目规范；完成任务后应把稳定经验沉淀回这里。
 - `.codex/`：项目级 Codex agents、hooks 和配置。
@@ -227,12 +228,12 @@ TRELLIS_CHAIN_BLOCK = f"""{TRELLIS_BLOCK_START}
 
 1. 先由 DXM core 做 `project-grill`：有代码/文档时先查证，空项目按 `new-project-grill`，小脚本/demo 按 `lightweight-grill`；核心流程不依赖 sibling skill。
 2. 从第一性原理出发、质疑隐藏假设，先从代码和文档自行判断，再单批提出 0–3 个阻塞问题；`grill-with-docs` 可在已安装且任务描述匹配时做同样有界的查证，full `grilling` / legacy `grill-me` 仅在用户 explicit opt-in 深度澄清时作为 optional 增强。
-3. 把结论写入 `.trellis/tasks/<task>/prd.md`，不能只停留在聊天上下文里。
-4. 用 `.trellis/scripts/task.py start <task>` 进入 Trellis active task。
-5. 按 Trellis 的 implement/check/update-spec 节奏开发、验证、沉淀规范。
-6. 任务完成后执行对抗性检查，挑战需求偏差、隐藏假设、负路径、架构边界、测试、文档、敏感信息、乱码和回滚/恢复。
+3. 写 `.dxm/runs/<run_id>/run.json` 锁定原始 goal、outcomes、`baseline_impact`、risk 和证据层级。
+4. 把结论写入 `.trellis/tasks/<task>/prd.md`，不能只停留在聊天上下文里。
+5. 用 `.trellis/scripts/task.py start <task>` 进入 Trellis active task，按 implement/check/update-spec 节奏开发。
+6. 任务完成后执行对抗性检查；high-risk 再由不同 Agent 完成 canonical `independent-review.md`，供 receipt 绑定 SHA-256 与 reviewer/time/PASS 元数据。
 7. 对抗性检查通过后同步 DXM 长期文档；不能只更新 `.trellis/` 内部状态。
-8. 先把最终 `check.md` 的文件首个非空行写成顶格独立且全文唯一的 `<!-- DXM-CHECK:PASS -->`，不得存在其他或未闭合 `DXM-CHECK` 片段；再执行 `finish` 和 `archive <task> --no-commit`，在 `.trellis/tasks/archive/<YYYY-MM>/<task>/completion.json` 生成并校验回执；归档前不得预写 `finished: true`。
+8. 最终 `check.md` PASS 后执行 `finish` 和 `archive <task> --no-commit`，在归档目录生成并校验 `schema_version: 2` completion receipt；归档前不得预写 `finished: true`。
 
 {TRELLIS_BLOCK_END}
 """
@@ -249,7 +250,7 @@ Before starting or continuing a Trellis task in a DXM workspace, `AGENTS.md` is 
 - GitHub/PR/push/merge/version/tag/release/publish: `开发者AI开发与PR提交流程.md`
 
 If project-local rules require more, obey the stricter set. Do not let Trellis task context override DXM, user instructions, Git authorization rules, read-only intent, or secret-handling rules.
-Before asking requirements, reason from first principles（第一性原理）, inspect local evidence first, and ask one batch of 0–3 blocking questions. A matching installed `grill-with-docs` may support the same bounded flow; full `grilling` requires explicit opt-in. After a Trellis task completion, run an adversarial check（对抗性检查）, make exactly one `<!-- DXM-CHECK:PASS -->` fragment the first non-empty, column-zero standalone line in the final `check.md`, reject any other or unclosed `DXM-CHECK` fragment, then `finish`, `archive <task> --no-commit`, and validate the archived completion receipt.
+Before asking requirements, reason from first principles（第一性原理）, inspect local evidence first, and ask one batch of 0–3 blocking questions; full `grilling` requires explicit opt-in. Before implementation writes, create `.dxm/runs/<run_id>/run.json`; source-only work records `unverified_boundaries`, runtime claims use a fresh structured observation, and high-risk completion needs a canonical hash-bound `independent-review.md` by a different Agent. Run an adversarial check（对抗性检查）before the final Trellis check, then `finish`, `archive <task> --no-commit`, and validate the schema_version: 2 archived receipt.
 
 {TRELLIS_START_STEP0_END}
 """
@@ -260,7 +261,7 @@ TRELLIS_WORKFLOW_OVERRIDE_BLOCK = f"""{TRELLIS_WORKFLOW_OVERRIDE_START}
 
 When no Trellis task is active, use DXM routing instead of forcing a task for every change:
 
-- 只读排查、解释、日志查看、普通小修、单点 bug、轻量文档调整：可以按 DXM inline 完成，不要求创建 Trellis task。
+- 只读排查、解释、日志查看：按 audit；普通小修、单点 bug、轻量文档调整：按 DXM inline **run-only** 完成，不要求 Trellis task。
 - 新功能、架构变化、跨多文件重构、多阶段任务、长期沉淀价值：先用 DXM core 做有界 project-grill，用户已批准后再创建/启动 Trellis task。
 - 需求提问前从第一性原理出发，先查本地证据并单批提出 0–3 个阻塞问题；匹配且已安装时可用 optional 有界 `grill-with-docs`，full `grilling` / legacy `grill-me` 仅在用户 explicit opt-in 时作为深度增强。
 - Trellis 任务完成后必须先执行对抗性检查，把最终 `check.md` 的文件首个非空行写成顶格独立且全文唯一的 `<!-- DXM-CHECK:PASS -->`，不得存在其他或未闭合 `DXM-CHECK` 片段，再按 `finish` → `archive <task> --no-commit` → 归档回执校验收口。

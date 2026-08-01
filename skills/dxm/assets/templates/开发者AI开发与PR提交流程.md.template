@@ -8,7 +8,7 @@ AI 在本项目里进行开发、整理改动、发起 PR、更新 PR、补充�
 
 <!-- DXM-DOC-RULES:START -->
 
-<!-- DXM-CONTRACT:1 -->
+<!-- DXM-CONTRACT:2 -->
 
 ## DXM 文档维护规则
 

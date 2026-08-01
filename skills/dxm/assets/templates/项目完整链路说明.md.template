@@ -8,7 +8,7 @@
 
 <!-- DXM-DOC-RULES:START -->
 
-<!-- DXM-CONTRACT:1 -->
+<!-- DXM-CONTRACT:2 -->
 
 ## DXM 文档维护规则
 
@@ -65,6 +65,8 @@
 
 记录所有运行态输出文件、数据库表、缓存目录、日志文件、产物目录的用途和状态含义。
 
+DXM 本地治理状态至少包含 `.dxm/project.json` 和可写任务的 `.dxm/runs/<run_id>/run.json`；run-only completion 位于同目录。run 用 `baseline_impact` 区分 `affected` / `not_affected`，不得把未触及的长期验收项伪装成本次 passed。
+
 敏感输出只能说明用途，不能复制真实内容。
 
 ## 7. 常见故障归因
@@ -82,5 +84,7 @@
 ## 8. 测试与验证
 
 记录当前项目真实可用的测试、静态检查、启动验证和人工验收方式。
+
+可写任务先用 `validate_dxm.py run --root "<project-root>" --file .dxm/runs/<run_id>/run.json` 校验目标与范围。completion receipt 使用 `schema_version: 2`、`run_id`、`run_sha256` 和 task outcomes；运行态声明记录 fresh structured observation，source-only 写 `unverified_boundaries`，high-risk 写不同 Agent 的 `independent_review`，并用 `artifact_sha256` 绑定 task/run 目录的 canonical `independent-review.md` 及其 reviewer/time/PASS 元数据。
 
 如果 `package.json`、README、CI 配置和实际可运行命令冲突，以当前实际可运行命令为准，并在本文档里写清楚原因。

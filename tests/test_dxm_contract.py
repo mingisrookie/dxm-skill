@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import os
 import shutil
@@ -6,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -19,8 +21,9 @@ DXM_FILES = [
     "项目文件结构说明.md",
     "开发者AI开发与PR提交流程.md",
 ]
-CONTRACT_MARKER = "<!-- DXM-CONTRACT:1 -->"
+CONTRACT_MARKER = "<!-- DXM-CONTRACT:2 -->"
 RECEIPT_TASK = "07-13-dxm-workflow-state-machine"
+RUN_ID = "20260801T120000+0800-receipt-contract"
 
 
 def load_contract():
@@ -90,22 +93,125 @@ def valid_baseline(root: Path) -> dict:
     }
 
 
-def valid_receipt(root: Path) -> dict:
+def valid_run(root: Path) -> dict:
     return {
         "schema_version": 1,
-        "workflow_mode": "task",
+        "run_id": RUN_ID,
         "project_root": str(root.resolve()),
-        "requirements": [
+        "workflow_mode": "task",
+        "started_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+        "author": "primary-agent",
+        "goal": "Validate task-specific completion evidence.",
+        "scope": {
+            "paths": ["skills/dxm/scripts", "tests"],
+            "exclusions": ["Git publish operations"],
+        },
+        "outcomes": [
             {
                 "id": "AC-01",
-                "status": "passed",
+                "description": "The task-specific contract is implemented.",
+                "claim_type": "source",
                 "evidence_kinds": ["unit-test", "cli"],
             },
             {
                 "id": "AC-02",
-                "status": "passed",
+                "description": "Negative paths are covered.",
+                "claim_type": "source",
                 "evidence_kinds": ["unit-test"],
             },
+        ],
+        "baseline_impact": [
+            {
+                "id": "AC-01",
+                "status": "affected",
+                "rationale": "This task changes the completion validator.",
+                "outcome_ids": ["AC-01"],
+            },
+            {
+                "id": "AC-02",
+                "status": "not_affected",
+                "rationale": "Marker parsing is outside this task.",
+            },
+        ],
+        "risk": {
+            "level": "normal",
+            "reasons": [],
+            "independent_review_required": False,
+        },
+        "trellis": {"required": True, "task": RECEIPT_TASK},
+        "unverified_boundaries": [
+            "This source-only fixture does not claim runtime deployment."
+        ],
+    }
+
+
+def canonical_run_path(root: Path, run_id: str = RUN_ID) -> Path:
+    return root / ".dxm" / "runs" / run_id / "run.json"
+
+
+def write_run(root: Path, run: dict) -> Path:
+    path = canonical_run_path(root, run["run_id"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(run, ensure_ascii=False), encoding="utf-8", newline="\n")
+    return path
+
+
+def valid_observation(**overrides) -> dict:
+    observation = {
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+        "subject": "DXM validator CLI",
+        "method": "python validate_dxm.py receipt --root <root> --file <receipt>",
+        "result": "passed",
+        "summary": "The decisive validation branch returned exit 0.",
+    }
+    observation.update(overrides)
+    return observation
+
+
+def write_independent_review_artifact(
+    path: Path,
+    *,
+    reviewer: str,
+    reviewed_at: str,
+    verdict: str = "PASS",
+) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"reviewer_id: {reviewer}\n"
+        f"reviewed_at: {reviewed_at}\n"
+        f"verdict: {verdict}\n\n"
+        "## Findings\n\nNo blocking findings.\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def valid_receipt(root: Path) -> dict:
+    run_path = canonical_run_path(root)
+    run = (
+        json.loads(run_path.read_text(encoding="utf-8"))
+        if run_path.is_file()
+        else valid_run(root)
+    )
+    run_hash = hashlib.sha256(
+        run_path.read_bytes()
+        if run_path.is_file()
+        else json.dumps(run, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    return {
+        "schema_version": 2,
+        "run_id": run["run_id"],
+        "run_sha256": run_hash,
+        "workflow_mode": "task",
+        "project_root": str(root.resolve()),
+        "requirements": [
+            {
+                "id": outcome["id"],
+                "status": "passed",
+                "evidence_kinds": list(outcome["evidence_kinds"]),
+            }
+            for outcome in run["outcomes"]
         ],
         "evidence": {
             "AC-01": {
@@ -114,6 +220,8 @@ def valid_receipt(root: Path) -> dict:
             },
             "AC-02": {"unit-test": ["orphan marker regression: pass"]},
         },
+        "baseline_impact": run["baseline_impact"],
+        "unverified_boundaries": run["unverified_boundaries"],
         "adversarial_check": {"passed": True, "summary": "No blocking gaps."},
         "quality_checks": {
             "docs": True,
@@ -122,10 +230,10 @@ def valid_receipt(root: Path) -> dict:
             "rollback": True,
         },
         "trellis": {
-            "required": True,
-            "task": RECEIPT_TASK,
-            "check_passed": True,
-            "finished": True,
+            "required": run["trellis"]["required"],
+            "task": run["trellis"]["task"],
+            "check_passed": run["trellis"]["required"],
+            "finished": run["trellis"]["required"],
         },
         "git": {
             "commit_performed": False,
@@ -154,6 +262,7 @@ def write_receipt_project(root: Path, contract) -> None:
     baseline_path = root / ".dxm" / "project.json"
     baseline_path.parent.mkdir()
     baseline_path.write_text(json.dumps(baseline, ensure_ascii=False), encoding="utf-8", newline="\n")
+    write_run(root, valid_run(root))
     chain = root / "项目完整链路说明.md"
     chain.write_text(
         chain.read_text(encoding="utf-8") + "\n" + contract.baseline_markdown(baseline),
@@ -1121,6 +1230,125 @@ class AuditContractTests(unittest.TestCase):
             self.assertIn("placeholder", " ".join(result.issues).lower())
 
 
+class RunContractTests(unittest.TestCase):
+    def test_complete_canonical_run_is_valid(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            path = canonical_run_path(root)
+
+            self.assertEqual(contract.validate_run(path, expected_root=root), [])
+
+    def test_run_rejects_identity_time_scope_outcome_and_risk_drift(self) -> None:
+        contract = load_contract()
+        mutations = {
+            "run_id": lambda run: run.update(run_id="../escape"),
+            "future time": lambda run: run.update(
+                started_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+            ),
+            "scope": lambda run: run["scope"].update(paths=["../outside"]),
+            "outcome": lambda run: run["outcomes"].append(dict(run["outcomes"][0])),
+            "risk": lambda run: run["risk"].update(
+                level="high", independent_review_required=False
+            ),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                write_receipt_project(root, contract)
+                run = valid_run(root)
+                mutate(run)
+
+                errors = contract.validate_run(run, expected_root=root)
+
+                self.assertTrue(errors, label)
+
+    def test_run_rejects_windows_alias_and_trailing_dot_ids(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            for run_id in ("alias.", "CON", "nul.json", "COM1.audit", "LPT9"):
+                with self.subTest(run_id=run_id):
+                    run = valid_run(root)
+                    run["run_id"] = run_id
+
+                    errors = contract.validate_run(run, expected_root=root)
+
+                    self.assertIn("run_id", " ".join(errors))
+
+            if os.name == "nt":
+                case_alias = root / ".dxm" / "runs" / RUN_ID.swapcase() / "run.json"
+                alias_errors = contract.validate_run(case_alias, expected_root=root)
+                self.assertIn(".dxm/runs", " ".join(alias_errors).replace("\\", "/"))
+
+    def test_run_requires_exact_baseline_impact_map(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            run = valid_run(root)
+            run["baseline_impact"].pop()
+            run["baseline_impact"][0]["outcome_ids"] = ["UNKNOWN"]
+
+            errors = contract.validate_run(run, expected_root=root)
+
+            combined = " ".join(errors).lower()
+            self.assertIn("baseline", combined)
+            self.assertIn("outcome", combined)
+
+    def test_not_affected_impact_rejects_pass_padding_and_outcome_ids(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            run = valid_run(root)
+            run["baseline_impact"][1]["passed"] = True
+            run["baseline_impact"][1]["outcome_ids"] = []
+
+            errors = contract.validate_run(run, expected_root=root)
+
+            combined = " ".join(errors)
+            self.assertIn("unsupported fields", combined)
+            self.assertIn("must be omitted", combined)
+
+    def test_source_only_run_requires_unverified_boundary(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            run = valid_run(root)
+            run["unverified_boundaries"] = []
+
+            errors = contract.validate_run(run, expected_root=root)
+
+            self.assertIn("unverified_boundaries", " ".join(errors))
+
+    def test_run_rejects_missing_or_unstarted_declared_trellis_task(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            run = valid_run(root)
+            run["trellis"]["task"] = "missing-task"
+
+            missing_errors = contract.validate_run(run, expected_root=root)
+
+            self.assertIn("trellis.task", " ".join(missing_errors))
+
+            run["trellis"]["task"] = RECEIPT_TASK
+            task_json = (
+                root / ".trellis" / "tasks" / "archive" / "2026-07" / RECEIPT_TASK / "task.json"
+            )
+            task_json.write_text(
+                json.dumps({"id": "dxm-workflow-state-machine", "status": "planning"}),
+                encoding="utf-8",
+            )
+            state_errors = contract.validate_run(run, expected_root=root)
+            self.assertIn("started", " ".join(state_errors))
+
+
 class ReceiptContractTests(unittest.TestCase):
     def test_complete_receipt_is_valid(self) -> None:
         contract = load_contract()
@@ -1181,6 +1409,29 @@ class ReceiptContractTests(unittest.TestCase):
             combined = " ".join(errors)
             self.assertIn("key contains a high-confidence credential", combined)
             self.assertNotIn(secret_key, combined)
+
+    def test_receipt_evidence_errors_do_not_echo_secret_shaped_ids_or_kinds(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            receipt = valid_receipt(root)
+            secret_id = "Bearer " + ("a" * 32)
+            secret_kind = "api_key=" + ("b" * 32)
+            receipt["requirements"][0]["id"] = secret_id
+            receipt["requirements"][0]["evidence_kinds"] = [secret_kind]
+            receipt["evidence"] = {
+                secret_id: {secret_kind: [0]},
+                "AC-02": receipt["evidence"]["AC-02"],
+            }
+
+            errors = contract.validate_receipt(receipt, expected_root=root)
+
+            combined = " ".join(errors)
+            self.assertIn("high-confidence credential", combined)
+            self.assertIn("requirements[0]", combined)
+            self.assertNotIn(secret_id, combined)
+            self.assertNotIn(secret_kind, combined)
 
     def test_receipt_rejects_credential_key_value_pairs_and_nested_values(self) -> None:
         contract = load_contract()
@@ -1314,7 +1565,7 @@ class ReceiptContractTests(unittest.TestCase):
 
             self.assertIn("duplicate object keys", " ".join(errors))
 
-    def test_receipt_rejects_requirements_that_do_not_exactly_cover_project_baseline(self) -> None:
+    def test_receipt_rejects_requirements_that_do_not_exactly_cover_bound_run(self) -> None:
         contract = load_contract()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1326,8 +1577,356 @@ class ReceiptContractTests(unittest.TestCase):
             errors = contract.validate_receipt(receipt, expected_root=root)
 
             combined = " ".join(errors).lower()
-            self.assertIn("baseline", combined)
+            self.assertIn("run", combined)
             self.assertIn("requirements", combined)
+
+    def test_receipt_rejects_run_hash_and_baseline_impact_drift(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            receipt = valid_receipt(root)
+            receipt["run_sha256"] = "0" * 64
+            receipt["baseline_impact"][0]["status"] = "not_affected"
+            receipt["baseline_impact"][0].pop("outcome_ids")
+
+            errors = contract.validate_receipt(receipt, expected_root=root)
+
+            combined = " ".join(errors).lower()
+            self.assertIn("run_sha256", combined)
+            self.assertIn("baseline_impact", combined)
+
+    @unittest.skipUnless(os.name == "nt", "case-insensitive path alias applies on Windows")
+    def test_receipt_rejects_case_alias_run_id_that_resolves_to_bound_run(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            receipt = valid_receipt(root)
+            receipt["run_id"] = RUN_ID.swapcase()
+
+            errors = contract.validate_receipt(receipt, expected_root=root)
+
+            self.assertIn("exactly match", " ".join(errors))
+
+    def test_runtime_claim_requires_fresh_structured_observations(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            run = valid_run(root)
+            run["outcomes"][0]["claim_type"] = "behavior"
+            write_run(root, run)
+            receipt = valid_receipt(root)
+            receipt["evidence"]["AC-01"] = {
+                "unit-test": [valid_observation()],
+                "cli": [valid_observation()],
+            }
+
+            self.assertEqual(contract.validate_receipt(receipt, expected_root=root), [])
+
+            receipt["evidence"]["AC-01"]["cli"] = ["CLI passed"]
+            string_errors = contract.validate_receipt(receipt, expected_root=root)
+            self.assertIn("structured observation", " ".join(string_errors))
+
+            receipt["evidence"]["AC-01"]["cli"] = [
+                valid_observation(
+                    observed_at=(datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+                )
+            ]
+            stale_errors = contract.validate_receipt(receipt, expected_root=root)
+            self.assertIn("run.started_at", " ".join(stale_errors))
+
+    def test_runtime_artifact_hash_and_isolated_decisive_branch_are_verified(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            artifact = root / "dist" / "validator.txt"
+            artifact.parent.mkdir()
+            artifact.write_text("final artifact", encoding="utf-8")
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            run = valid_run(root)
+            run["outcomes"][0]["claim_type"] = "behavior"
+            write_run(root, run)
+            receipt = valid_receipt(root)
+            receipt["evidence"]["AC-01"] = {
+                "unit-test": [valid_observation()],
+                "cli": [
+                    valid_observation(
+                        path="dist/validator.txt",
+                        sha256=digest,
+                        isolated=True,
+                        final_artifact=True,
+                        decisive_branch="receipt v2 validation accepted the final artifact",
+                    )
+                ],
+            }
+
+            self.assertEqual(contract.validate_receipt(receipt, expected_root=root), [])
+
+            receipt["evidence"]["AC-01"]["cli"][0]["sha256"] = "0" * 64
+            receipt["evidence"]["AC-01"]["cli"][0].pop("decisive_branch")
+            errors = contract.validate_receipt(receipt, expected_root=root)
+            combined = " ".join(errors)
+            self.assertIn("sha256", combined)
+            self.assertIn("decisive_branch", combined)
+
+    def test_runtime_observation_rejects_future_failed_and_outside_artifact(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            run = valid_run(root)
+            run["outcomes"][0]["claim_type"] = "behavior"
+            write_run(root, run)
+            receipt = valid_receipt(root)
+            bad = valid_observation(
+                observed_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+                result="failed",
+                path="../outside.txt",
+                sha256="0" * 64,
+            )
+            receipt["evidence"]["AC-01"] = {
+                "unit-test": [valid_observation()],
+                "cli": [bad],
+            }
+
+            errors = contract.validate_receipt(receipt, expected_root=root)
+
+            combined = " ".join(errors).lower()
+            self.assertIn("future", combined)
+            self.assertIn("result", combined)
+            self.assertIn("parent", combined)
+
+    def test_high_risk_receipt_requires_distinct_independent_reviewer(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            run = valid_run(root)
+            run["risk"] = {
+                "level": "high",
+                "reasons": ["multi-module contract change"],
+                "independent_review_required": True,
+            }
+            write_run(root, run)
+            receipt = valid_receipt(root)
+            reviewed_at = datetime.now(timezone.utc).isoformat()
+            artifact = (
+                root
+                / ".trellis"
+                / "tasks"
+                / "archive"
+                / "2026-07"
+                / RECEIPT_TASK
+                / "independent-review.md"
+            )
+            digest = write_independent_review_artifact(
+                artifact,
+                reviewer="second-agent",
+                reviewed_at=reviewed_at,
+            )
+            receipt["independent_review"] = {
+                "reviewer": "second-agent",
+                "reviewed_at": reviewed_at,
+                "verdict": "passed",
+                "summary": "No blocking finding.",
+                "artifact": artifact.relative_to(root).as_posix(),
+                "artifact_sha256": digest,
+            }
+
+            self.assertEqual(contract.validate_receipt(receipt, expected_root=root), [])
+
+            receipt["independent_review"]["reviewer"] = run["author"]
+            errors = contract.validate_receipt(receipt, expected_root=root)
+            self.assertIn("different", " ".join(errors).lower())
+
+    def test_high_risk_review_rejects_unrelated_unhashed_or_mismatched_artifact(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            run = valid_run(root)
+            run["risk"] = {
+                "level": "high",
+                "reasons": ["multi-module contract change"],
+                "independent_review_required": True,
+            }
+            write_run(root, run)
+            reviewed_at = datetime.now(timezone.utc).isoformat()
+            canonical = (
+                root
+                / ".trellis"
+                / "tasks"
+                / "archive"
+                / "2026-07"
+                / RECEIPT_TASK
+                / "independent-review.md"
+            )
+            digest = write_independent_review_artifact(
+                canonical,
+                reviewer="second-agent",
+                reviewed_at=reviewed_at,
+            )
+            receipt = valid_receipt(root)
+            receipt["independent_review"] = {
+                "reviewer": "second-agent",
+                "reviewed_at": reviewed_at,
+                "verdict": "passed",
+                "summary": "No blocking finding.",
+                "artifact": canonical.relative_to(root).as_posix(),
+                "artifact_sha256": digest,
+            }
+
+            unrelated = root / "README.md"
+            unrelated_digest = write_independent_review_artifact(
+                unrelated,
+                reviewer="second-agent",
+                reviewed_at=reviewed_at,
+            )
+            receipt["independent_review"].update(
+                artifact="README.md", artifact_sha256=unrelated_digest
+            )
+            path_errors = contract.validate_receipt(receipt, expected_root=root)
+            self.assertIn("canonical independent-review.md", " ".join(path_errors))
+
+            receipt["independent_review"].update(
+                artifact=canonical.relative_to(root).as_posix()
+            )
+            receipt["independent_review"].pop("artifact_sha256")
+            missing_hash_errors = contract.validate_receipt(receipt, expected_root=root)
+            self.assertIn("artifact_sha256", " ".join(missing_hash_errors))
+
+            receipt["independent_review"].update(
+                artifact=canonical.relative_to(root).as_posix(), artifact_sha256="0" * 64
+            )
+            hash_errors = contract.validate_receipt(receipt, expected_root=root)
+            self.assertIn("artifact_sha256", " ".join(hash_errors))
+
+            mismatched_digest = write_independent_review_artifact(
+                canonical,
+                reviewer="different-reviewer",
+                reviewed_at=reviewed_at,
+                verdict="BLOCKED",
+            )
+            receipt["independent_review"]["artifact_sha256"] = mismatched_digest
+            metadata_errors = contract.validate_receipt(receipt, expected_root=root)
+            combined = " ".join(metadata_errors)
+            self.assertIn("reviewer_id", combined)
+            self.assertIn("verdict", combined)
+
+            canonical.write_text(
+                "<!--\n"
+                "reviewer_id: second-agent\n"
+                f"reviewed_at: {reviewed_at}\n"
+                "verdict: PASS\n"
+                "-->\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            receipt["independent_review"]["artifact_sha256"] = hashlib.sha256(
+                canonical.read_bytes()
+            ).hexdigest()
+            commented_errors = contract.validate_receipt(receipt, expected_root=root)
+            self.assertIn("exactly one reviewer_id", " ".join(commented_errors))
+
+            stale_digest = write_independent_review_artifact(
+                canonical,
+                reviewer="second-agent",
+                reviewed_at=(datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+            )
+            receipt["independent_review"]["artifact_sha256"] = stale_digest
+            timestamp_errors = contract.validate_receipt(receipt, expected_root=root)
+            self.assertIn("reviewed_at must match", " ".join(timestamp_errors))
+
+    def test_high_risk_inline_run_uses_run_local_independent_review(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            run = valid_run(root)
+            run["trellis"] = {"required": False, "task": None}
+            run["risk"] = {
+                "level": "high",
+                "reasons": ["live-data change"],
+                "independent_review_required": True,
+            }
+            write_run(root, run)
+            receipt = valid_receipt(root)
+            receipt["trellis"] = {
+                "required": False,
+                "task": None,
+                "check_passed": False,
+                "finished": False,
+            }
+            reviewed_at = datetime.now(timezone.utc).isoformat()
+            artifact = canonical_run_path(root).with_name("independent-review.md")
+            digest = write_independent_review_artifact(
+                artifact,
+                reviewer="second-agent",
+                reviewed_at=reviewed_at,
+            )
+            receipt["independent_review"] = {
+                "reviewer": "second-agent",
+                "reviewed_at": reviewed_at,
+                "verdict": "passed",
+                "summary": "No blocking finding.",
+                "artifact": artifact.relative_to(root).as_posix(),
+                "artifact_sha256": digest,
+            }
+
+            self.assertEqual(contract.validate_receipt(receipt, expected_root=root), [])
+
+    def test_inline_receipt_must_use_canonical_run_completion_path(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            run = valid_run(root)
+            run["trellis"] = {"required": False, "task": None}
+            write_run(root, run)
+            receipt = valid_receipt(root)
+            receipt["trellis"] = {
+                "required": False,
+                "task": None,
+                "check_passed": False,
+                "finished": False,
+            }
+            canonical = canonical_run_path(root).with_name("completion.json")
+            canonical.write_text(json.dumps(receipt), encoding="utf-8")
+            wrong = root / "completion.json"
+            wrong.write_text(json.dumps(receipt), encoding="utf-8")
+
+            self.assertEqual(contract.validate_receipt(canonical, expected_root=root), [])
+            self.assertIn(
+                ".dxm/runs",
+                " ".join(contract.validate_receipt(wrong, expected_root=root)).replace("\\", "/"),
+            )
+
+    def test_legacy_v1_requires_explicit_audit_opt_in(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            receipt = valid_receipt(root)
+            receipt["schema_version"] = 1
+            receipt.pop("run_id")
+            receipt.pop("run_sha256")
+            receipt.pop("baseline_impact")
+            receipt.pop("unverified_boundaries")
+
+            default_errors = contract.validate_receipt(receipt, expected_root=root)
+            legacy_errors = contract.validate_receipt(
+                receipt, expected_root=root, allow_legacy=True
+            )
+            v2_legacy_errors = contract.validate_receipt(
+                valid_receipt(root), expected_root=root, allow_legacy=True
+            )
+
+            self.assertIn("legacy", " ".join(default_errors).lower())
+            self.assertEqual(legacy_errors, [])
+            self.assertIn("schema_version 1", " ".join(v2_legacy_errors))
 
     def test_receipt_rejects_nonexistent_or_unstarted_trellis_task_and_missing_check_artifact(self) -> None:
         contract = load_contract()
@@ -1687,7 +2286,7 @@ class ValidatorCliTests(unittest.TestCase):
             self.assertIn("state: PARTIAL", result.stdout)
             self.assertNotIn("Next", result.stdout)
 
-    def test_baseline_and_receipt_cli_return_structured_json(self) -> None:
+    def test_baseline_run_and_receipt_cli_return_structured_json(self) -> None:
         contract = load_contract()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1706,6 +2305,14 @@ class ValidatorCliTests(unittest.TestCase):
             receipt.write_text(json.dumps(valid_receipt(root)), encoding="utf-8")
 
             baseline_result = self.run_cli("baseline", "--file", str(baseline), "--json")
+            run_result = self.run_cli(
+                "run",
+                "--root",
+                str(root),
+                "--file",
+                str(canonical_run_path(root)),
+                "--json",
+            )
             receipt_result = self.run_cli(
                 "receipt",
                 "--root",
@@ -1717,8 +2324,65 @@ class ValidatorCliTests(unittest.TestCase):
 
             self.assertEqual(baseline_result.returncode, contract.EXIT_OK, baseline_result.stderr)
             self.assertEqual(json.loads(baseline_result.stdout)["valid"], True)
+            self.assertEqual(run_result.returncode, contract.EXIT_OK, run_result.stderr)
+            self.assertEqual(json.loads(run_result.stdout)["valid"], True)
             self.assertEqual(receipt_result.returncode, contract.EXIT_OK, receipt_result.stderr)
             self.assertEqual(json.loads(receipt_result.stdout)["valid"], True)
+
+    def test_receipt_cli_keeps_legacy_v1_audit_explicit_and_v1_only(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            receipt_path = (
+                root
+                / ".trellis"
+                / "tasks"
+                / "archive"
+                / "2026-07"
+                / RECEIPT_TASK
+                / "completion.json"
+            )
+            current = valid_receipt(root)
+            receipt_path.write_text(json.dumps(current), encoding="utf-8")
+
+            wrong_mode = self.run_cli(
+                "receipt",
+                "--root",
+                str(root),
+                "--file",
+                str(receipt_path),
+                "--legacy-v1",
+                "--json",
+            )
+            self.assertEqual(wrong_mode.returncode, contract.EXIT_INVALID)
+            self.assertEqual(json.loads(wrong_mode.stdout)["kind"], "legacy-receipt")
+            self.assertIn("schema_version 1", wrong_mode.stdout)
+
+            legacy = dict(current)
+            legacy["schema_version"] = 1
+            for field in ("run_id", "run_sha256", "baseline_impact", "unverified_boundaries"):
+                legacy.pop(field)
+            receipt_path.write_text(json.dumps(legacy), encoding="utf-8")
+            default_result = self.run_cli(
+                "receipt", "--root", str(root), "--file", str(receipt_path), "--json"
+            )
+            audit_result = self.run_cli(
+                "receipt",
+                "--root",
+                str(root),
+                "--file",
+                str(receipt_path),
+                "--legacy-v1",
+                "--json",
+            )
+
+            self.assertEqual(default_result.returncode, contract.EXIT_INVALID)
+            self.assertIn("legacy", default_result.stdout.lower())
+            self.assertEqual(audit_result.returncode, contract.EXIT_OK, audit_result.stderr)
+            payload = json.loads(audit_result.stdout)
+            self.assertEqual(payload["kind"], "legacy-receipt")
+            self.assertTrue(payload["valid"])
 
     def test_receipt_cli_requires_explicit_trusted_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1774,9 +2438,10 @@ class ValidatorCliTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("dxm-validator", result.stdout)
-        self.assertIn("contract=1", result.stdout)
+        self.assertIn("contract=2", result.stdout)
         self.assertIn("baseline-schema=1", result.stdout)
-        self.assertIn("receipt-schema=1", result.stdout)
+        self.assertIn("run-schema=1", result.stdout)
+        self.assertIn("receipt-schema=2", result.stdout)
 
     def test_core_only_install_reports_the_release_version(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -28,11 +28,15 @@ POLICY_ASSETS = {
 REQUIRED_COVERAGE = {
     "audit",
     "init",
+    "partial_continue",
     "root_mismatch_windows",
     "root_mismatch_unc",
     "review_scope",
     "live_service_gate",
     "ui_gate",
+    "small_run",
+    "source_only",
+    "high_risk_review",
 }
 VALID_MODES = {"audit", "init", "task", "scaffold-only"}
 VALID_READINESS = {
@@ -285,6 +289,17 @@ class WorkflowCasesTest(unittest.TestCase):
         self.assertTrue(expected["local_evidence_first"])
         self.assertIn("scaffold_before_blocking_clarification_resolved", expected["forbidden_actions"])
 
+    def test_partial_workspace_continue_routes_to_task(self) -> None:
+        expected = self.cases_by_coverage()["partial_continue"]["expected"]
+        self.assertEqual(expected["mode"], "task")
+        self.assertEqual(expected["readiness"], dxm_contract.PARTIAL)
+        self.assertEqual(expected["phase"], "scope_locked")
+        self.assertTrue(expected["write_allowed"])
+        self.assertIn("readiness_gap_backlog", expected["evidence_gate"]["required"])
+        self.assertTrue({"rerun_initialization", "report_READY"}.issubset(expected["forbidden_actions"]))
+        self.assertIn("`task` wins by default", POLICY_ASSETS["skill"])
+        self.assertIn("PARTIAL 工作区上的续开发请求默认走 `task`", POLICY_ASSETS["agents_template"])
+
     def test_windows_and_unc_root_mismatches_use_path_semantics(self) -> None:
         cases = self.cases_by_coverage()
         for coverage, flavor in (
@@ -360,6 +375,36 @@ class WorkflowCasesTest(unittest.TestCase):
             term = EVIDENCE_POLICY_TERMS[evidence]
             for text in POLICY_ASSETS.values():
                 self.assertIn(term, text.lower())
+
+    def test_small_clear_fix_uses_run_without_forcing_trellis(self) -> None:
+        expected = self.cases_by_coverage()["small_run"]["expected"]
+        self.assertEqual(expected["mode"], "task")
+        self.assertTrue(expected["write_allowed"])
+        self.assertIn("lightweight_run", expected["evidence_gate"]["required"])
+        self.assertIn("force_trellis_task", expected["forbidden_actions"])
+        for text in POLICY_ASSETS.values():
+            self.assertIn("run-only", text.lower())
+
+    def test_source_only_case_forbids_runtime_completion_wording(self) -> None:
+        expected = self.cases_by_coverage()["source_only"]["expected"]
+        self.assertIn("unverified_boundaries", expected["evidence_gate"]["required"])
+        self.assertIn("claim_runtime_complete", expected["forbidden_actions"])
+        self.assertIn("runtime_observation", expected["evidence_gate"]["insufficient_alone"])
+        for text in POLICY_ASSETS.values():
+            self.assertIn("source-only", text.lower())
+            self.assertIn("unverified_boundaries", text)
+
+    def test_high_risk_case_requires_independent_second_agent(self) -> None:
+        expected = self.cases_by_coverage()["high_risk_review"]["expected"]
+        self.assertIn("independent_review", expected["evidence_gate"]["required"])
+        self.assertIn("canonical_independent_review_artifact", expected["evidence_gate"]["required"])
+        self.assertIn("review_artifact_sha256", expected["evidence_gate"]["required"])
+        self.assertIn("self_review_only", expected["evidence_gate"]["insufficient_alone"])
+        self.assertIn("reuse_unrelated_review_artifact", expected["forbidden_actions"])
+        for text in POLICY_ASSETS.values():
+            self.assertIn("independent_review", text)
+            self.assertIn("independent-review.md", text)
+            self.assertIn("artifact_sha256", text)
 
 
 if __name__ == "__main__":

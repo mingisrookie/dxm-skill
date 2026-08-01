@@ -1,5 +1,46 @@
 # 更新日志
 
+## v1.2.0 - 2026-08-01
+
+### 新增
+
+- 所有可写 `init` / `task` 在实现前建立 lightweight `run.json`，锁定原始目标、范围、任务 outcomes、交付声明、证据类型、baseline impact、风险与 Trellis 路由；小而明确的修改保持 run-only，不再被迫创建 Trellis task。
+- completion receipt 独立升级到 schema v2，用 `run_id` 与 `run_sha256` 精确绑定本次任务，而不是把项目 baseline 的全部验收项填成本次通过。
+- 运行态声明使用带时间、主体、方法、结果和摘要的 structured observation；项目内 artifact 可用 path + SHA-256 绑定，isolated 证据必须证明最终产物和真实决定性分支。
+- high-risk 发布、部署、live-data 和多模块架构任务要求不同 Agent 的独立复核；回执会绑定 canonical `independent-review.md` 的身份、时间、PASS verdict 和 SHA-256。
+
+### 变更
+
+- 交付层级改为从用户当时的任务目标推导：源码、配置或单测不能单独证明真实运行态；拿不到所需证据时必须报告 partial/blocked，不能静默缩小目标。
+- 明确 source-only 可以完成源码交付，但必须记录 `unverified_boundaries`，且不得宣称已经生效、部署或在线修复。
+- `baseline_impact` 现在要求每个 baseline ID 精确标记为 `affected` 或 `not_affected`；未触及项不得伪装成本次 freshly passed。
+- DXM managed contract 升级到 v2；baseline 与 run 继续使用 schema v1，completion receipt 使用 schema v2，历史 receipt v1 仅能通过显式 `--legacy-v1` 做审计。
+- 当前 installed DXM core 与源码发布面分开核验，版本、manifest、自测与 validator 行为必须从安装路径实际读回。
+
+### 修复
+
+- 阻止 completion receipt 通过自定义 requirements、旧 baseline 证据或无关 review 文件缩小原始任务后自证完成。
+- 拒绝 `not_affected` 项携带 outcome/pass-padding 字段，并校验 run、receipt、canonical directory leaf 与大小写完全一致。
+- 拒绝尾随点和 Windows 设备名等会折叠到同一路径的 run ID，关闭大小写与路径别名绕过。
+- evidence 错误使用稳定索引，不再把不可信 requirement ID 或 evidence kind 原文回显到错误信息。
+- `--legacy-v1` 严格限制为 schema v1 历史审计，不能接受或冒充当前 v2 completion。
+
+### 验证
+
+- `python -B -m unittest discover -s tests -v`：共 197 项，196 项通过，1 项因当前 Windows 账号缺少目录 symlink 权限跳过。
+- source 与 installed `scaffold_dxm.py --self-test`。
+- source 与 installed `validate_dxm.py --version`、`audit --require-trellis`、canonical run/receipt 校验。
+- core-only 12 文件 source/installed SHA-256 manifest 一致性。
+- 独立第二 Agent 对抗审查、`git diff --check`、strict UTF-8/乱码和 credential-shaped literal 检查。
+
+### 已知限制与迁移
+
+- 已打开的 Codex 会话可能缓存旧 skill；文件安装态更新后，新任务或重启才能可靠加载新规则。
+- 仍使用 contract marker 1 的既有项目会被新版 audit 判为 `PARTIAL`，需用非破坏式 managed-block refresh 升级；baseline 数据本身无需升版。
+- 按明确非目标，本地完成门不提供签名服务、强制命令包装器或 append-only ledger；拥有整个工作区写权限的操作者仍能伪造全部本地状态。
+
+**完整更新记录：** [v1.1.0...v1.2.0](https://github.com/mingisrookie/dxm-skill/compare/v1.1.0...v1.2.0)
+
 ## v1.1.0 - 2026-07-13
 
 ### 新增
