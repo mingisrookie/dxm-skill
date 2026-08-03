@@ -461,7 +461,23 @@ class DxmV2SafetyTests(unittest.TestCase):
             payload = json.loads(rendered.split("\n", 3)[3].rsplit("\n````", 1)[0])
             self.assertEqual(payload["format"], "dxm-inventory-v2")
             self.assertTrue(payload["truncated"])
-            self.assertTrue(any(item["note"] == "tool-or-build-state-not-expanded" for item in payload["entries"]))
+
+            # Directory enumeration deliberately streams without sorting, so a
+            # two-entry bounded snapshot cannot promise which sibling appears.
+            # Verify the tool-state rule separately with enough capacity.
+            full_rendered = dxm_inventory.project_inventory(
+                root,
+                depth=4,
+                max_entries=8,
+                max_bytes=4096,
+                timeout_seconds=5,
+                skip_dirs=set(),
+                is_sensitive_name=lambda _name, _is_file: False,
+            )
+            full_payload = json.loads(full_rendered.split("\n", 3)[3].rsplit("\n````", 1)[0])
+            self.assertTrue(
+                any(item["note"] == "tool-or-build-state-not-expanded" for item in full_payload["entries"])
+            )
 
     def test_inventory_stops_wide_enumeration_at_the_entry_bound(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

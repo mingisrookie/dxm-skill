@@ -30,7 +30,7 @@
 
 ### 验证
 
-- `python -B -m unittest discover -s tests -q`：230 项通过，2 项因当前 Windows 账号缺少目录 symlink 权限跳过；另执行 `scaffold_dxm.py --self-test`、core-only copy smoke、`dxm.py --version`、`validate_dxm.py audit --root . --require-trellis --json` 与 `git diff --check`。
+- `python -B -m unittest discover -s tests -q`：231 项通过，2 项因当前 Windows 账号缺少目录 symlink 权限跳过；另执行 `scaffold_dxm.py --self-test`、core-only copy smoke、`dxm.py --version`、`validate_dxm.py audit --root . --require-trellis --json` 与 `git diff --check`。
 - v2 回归覆盖 P0 退出码/JSON、Git privacy、lock/recovery crash window、安全 inventory、schema/path/profile、Trellis 配置 adapter 与 core package smoke。
 - 发布时额外验证独立 reviewer PASS、归档 receipt、tag、GitHub Release/Latest 和 release asset 的干净再下载 SHA-256 manifest。
 

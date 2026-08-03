@@ -2,6 +2,7 @@ import importlib.util
 import hashlib
 import json
 import os
+import posixpath
 import shutil
 import subprocess
 import sys
@@ -9,6 +10,8 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -661,6 +664,18 @@ class BaselineContractTests(unittest.TestCase):
                     contract._portable_baseline_text("/tmp/Clone/logs", "/tmp/Clone"),
                     "$PROJECT_ROOT/logs",
                 )
+
+    def test_portable_baseline_accepts_lexical_root_alias_after_resolution(self) -> None:
+        contract = load_contract()
+        simulated_posix = SimpleNamespace(path=posixpath, sep="/", curdir=".")
+        with (
+            mock.patch.object(contract, "os", simulated_posix),
+            mock.patch.object(contract, "_canonical_path", return_value=Path("/private/tmp/Clone")),
+        ):
+            self.assertEqual(
+                contract._portable_baseline_text("/tmp/Clone/logs", "/tmp/Clone"),
+                "$PROJECT_ROOT/logs",
+            )
 
 
 class MarkerContractTests(unittest.TestCase):

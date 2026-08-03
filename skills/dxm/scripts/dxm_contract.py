@@ -746,8 +746,13 @@ def _safe_markdown_text(value: Any) -> str:
 def _portable_baseline_text(value: Any, project_root: str) -> str:
     text = " ".join(str(value).splitlines()).strip()
     canonical = str(_canonical_path(project_root))
+    lexical = os.path.abspath(os.path.expanduser(str(project_root)))
     root_norm = os.path.normcase(os.path.normpath(canonical))
-    variants = {canonical, canonical.replace("\\", "/"), canonical.replace("/", "\\")}
+    variants = {
+        variant
+        for root in (canonical, lexical)
+        for variant in (root, root.replace("\\", "/"), root.replace("/", "\\"))
+    }
     root_variants = sorted((item for item in variants if item and item not in {"/", "\\"}), key=len, reverse=True)
     cursor = 0
     while True:
