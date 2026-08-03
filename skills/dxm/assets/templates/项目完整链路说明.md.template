@@ -65,7 +65,9 @@
 
 记录所有运行态输出文件、数据库表、缓存目录、日志文件、产物目录的用途和状态含义。
 
-DXM 本地治理状态至少包含 `.dxm/project.json` 和可写任务的 `.dxm/runs/<run_id>/run.json`；run-only completion 位于同目录。run 用 `baseline_impact` 区分 `affected` / `not_affected`，不得把未触及的长期验收项伪装成本次 passed。
+DXM 本地治理状态至少包含 `.dxm/project.json` 和可写任务的 `.dxm/runs/<run_id>/run.json`；run-only completion 位于同目录。run 用 `baseline_impact` 区分 `affected` / `not_affected`，不得把未触及的长期验收项伪装成本次 passed。Git 项目通过 `.gitignore` 的 DXM 托管块忽略这些本地状态；若它们已被 Git 跟踪，audit 必须 BROKEN 并只给出人工修复建议。
+
+写入链路为：预检所有受管路径/marker → 取得项目锁 → journal 记录旧/新 digest → 同目录临时文件 `fsync` 后 `os.replace` → 提交或 rollback。journal 绑定安全 operation ID、文件名、entry schema 和 backup layout；recovery 拒绝 state link/reparse、错配或未验证 journal 后才会触碰文件。任何中断遗留都必须先运行 `scaffold_dxm.py --recover --root <root>`；不得以再次 scaffold 掩盖未完成事务。`audit`、`doctor` 与 completion receipt 对 active/stale/malformed lock、pending 或残留 committed journal 一律不报 READY。`--refresh-blocks` 发现已有有效 `.dxm/project.json` 时只重新水合其链路 baseline block，不重写该 JSON。显式 `init` 的退出码是最终 readiness，而 `--output json` 分别携带 operation_status、readiness、实际 exit_code、readiness_exit_code 和 issues；已请求 JSON 的参数边界错误也使用这一结构和 `DXM_E_INVALID_ARGUMENTS`。
 
 敏感输出只能说明用途，不能复制真实内容。
 
@@ -85,6 +87,6 @@ DXM 本地治理状态至少包含 `.dxm/project.json` 和可写任务的 `.dxm/
 
 记录当前项目真实可用的测试、静态检查、启动验证和人工验收方式。
 
-可写任务先用 `validate_dxm.py run --root "<project-root>" --file .dxm/runs/<run_id>/run.json` 校验目标与范围。completion receipt 使用 `schema_version: 2`、`run_id`、`run_sha256` 和 task outcomes；运行态声明记录 fresh structured observation，source-only 写 `unverified_boundaries`，high-risk 写不同 Agent 的 `independent_review`，并用 `artifact_sha256` 绑定 task/run 目录的 canonical `independent-review.md` 及其 reviewer/time/PASS 元数据。
+可写任务先用 `validate_dxm.py run --root "<project-root>" --file .dxm/runs/<run_id>/run.json` 校验目标与范围。completion receipt 使用 `schema_version: 2`、`run_id`、`run_sha256` 和 task outcomes；运行态声明记录 fresh structured observation，source-only 写 `unverified_boundaries`，high-risk 写不同 Agent 的 `independent_review`，并用 `artifact_sha256` 绑定 task/run 目录的 canonical `independent-review.md` 及其 reviewer/time/PASS 元数据。local review/hash 只做证据一致性校验；baseline `profile: high-assurance` 还需记录在独立可信边界验证过的 `external_provenance`。
 
 如果 `package.json`、README、CI 配置和实际可运行命令冲突，以当前实际可运行命令为准，并在本文档里写清楚原因。

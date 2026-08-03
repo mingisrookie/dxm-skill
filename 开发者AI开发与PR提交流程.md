@@ -139,7 +139,8 @@ gh pr view <PR_NUMBER> --json number,title,baseRefName,headRefName,state,isDraft
 5. GitHub Release：获得明确授权后，创建或更新 `GitHub Release`，并确认它是需要的 `Latest`。
 6. 中文更新日志：Release notes 默认使用中文，至少包含“更新日志 / 验证 / 完整更新记录”。
 7. 对比链接：Release notes 必须包含上一版本到当前版本的对比链接。
-8. 验证证据：Release notes 和最终回执都必须列出实际运行过的测试、自检、版本/tag/latest 核验结果。
+8. 发布资产：如交付 zip、安装包、二进制或其他下载物，必须生成并上传 SHA-256 manifest；版本资产与 manifest 都是公开发布面。
+9. 验证证据：Release notes 和最终回执都必须列出实际运行过的测试、自检、版本/tag/latest 核验，以及从 Release 再下载后与 manifest 比对的 hash 结果。
 
 授权边界：未获明确授权时，只能准备版本文件、`CHANGELOG.md`、Release notes 草稿和待执行命令清单；只有用户明确要求发布/推送/tag/release 后，才允许执行远端写操作。
 
@@ -155,11 +156,12 @@ git ls-remote origin refs/heads/$branch refs/tags/$tag
 gh release list -R $repo --limit 5
 gh release view $tag -R $repo --json tagName,name,body,url,publishedAt
 gh api repos/$repo/releases/latest --jq .tag_name
+# 如有 release asset：下载到干净目录并与发布的 SHA-256 manifest 比对
 ```
 
-`gh api repos/$repo/releases/latest --jq .tag_name` 必须返回当前 `$tag`，否则不能声称 `Latest` 已更新。本地 HEAD、远端分支和 tag 指向的提交必须一致，不能让 tag 指到旧提交。
+`gh api repos/$repo/releases/latest --jq .tag_name` 必须返回当前 `$tag`，否则不能声称 `Latest` 已更新。本地 HEAD、远端分支和 tag 指向的提交必须一致，不能让 tag 指到旧提交。存在 release asset 时，还必须从 GitHub Release 的干净下载目录重算 SHA-256，并与上传的 manifest 一致。
 
-如果 `main` 已推送但 `VERSION`、`CHANGELOG.md`、tag、`GitHub Release` 或 `Latest` 没同步，发布不算完成。
+如果 `main` 已推送但 `VERSION`、`CHANGELOG.md`、tag、`GitHub Release`、`Latest` 或应有的公开 asset/hash 核验没同步，发布不算完成。
 
 ## 最终反馈必须说明
 
@@ -171,5 +173,5 @@ gh api repos/$repo/releases/latest --jq .tag_name
 6. 是否推送、推送到哪个分支。
 7. 运行过哪些测试或检查；如果没跑，要明确说明。
 8. 是否已经合并；如果已合并，要说明合并目标、PR 状态和合并提交。
-9. 如果本次涉及发布，必须说明 `VERSION`、`CHANGELOG.md`、tag、GitHub Release URL、Latest 校验、中文 Release notes、对比链接和验证证据。
+9. 如果本次涉及发布，必须说明 `VERSION`、`CHANGELOG.md`、tag、GitHub Release URL、Latest 校验、中文 Release notes、对比链接、公开 asset/manifest hash 核验和验证证据。
 10. 未完成项、阻塞或风险。

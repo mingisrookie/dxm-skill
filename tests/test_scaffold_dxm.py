@@ -29,6 +29,13 @@ def assert_lf_only(testcase: unittest.TestCase, path: Path) -> None:
     testcase.assertNotIn(b"\r", data, f"{path.name} contains bare CR line endings")
 
 
+def inventory_payload(document: str) -> dict:
+    prefix = "````json\n"
+    start = document.index(prefix) + len(prefix)
+    end = document.index("\n````", start)
+    return json.loads(document[start:end])
+
+
 def write_fake_trellis(
     bin_dir: Path,
     *,
@@ -91,8 +98,12 @@ def write_fake_trellis(
 
 class ScaffoldDxmTests(unittest.TestCase):
     def run_scaffold(self, root: Path, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        forwarded = list(args)
+        if "--self-test" not in forwarded and "--recover" not in forwarded and "--mode" not in forwarded:
+            mode = "init" if "--baseline" in forwarded else "scaffold-only"
+            forwarded = ["--mode", mode, *forwarded]
         return subprocess.run(
-            [sys.executable, str(SCRIPT), "--root", str(root), *args],
+            [sys.executable, str(SCRIPT), "--root", str(root), *forwarded],
             cwd=REPO_ROOT,
             text=True,
             encoding="utf-8",
@@ -322,9 +333,10 @@ class ScaffoldDxmTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             structure = (root / "项目文件结构说明.md").read_text(encoding="utf-8")
-            self.assertIn("external-link", structure)
-            self.assertIn("不展开", structure)
-            self.assertNotIn("must-not-appear.txt", structure)
+            entries = {entry["path"]: entry for entry in inventory_payload(structure)["entries"]}
+            self.assertEqual(entries["external-link"]["kind"], "link")
+            self.assertEqual(entries["external-link"]["note"], "not-expanded")
+            self.assertNotIn("must-not-appear.txt", entries)
 
     def test_sensitive_inventory_matches_common_secret_names(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -337,9 +349,10 @@ class ScaffoldDxmTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             structure = (root / "项目文件结构说明.md").read_text(encoding="utf-8")
+            entries = {entry["path"]: entry for entry in inventory_payload(structure)["entries"]}
             for name in [".env.production", "server.pem", "id_rsa", "credentials.json"]:
-                self.assertRegex(structure, rf"`{re.escape(name)}`：运行态或敏感数据")
-            self.assertRegex(structure, r"`normal\.txt`：项目文件")
+                self.assertEqual(entries[name]["note"], "sensitive-name-not-expanded")
+            self.assertEqual(entries["normal.txt"]["note"], "project-file")
 
     def test_sensitive_inventory_avoids_false_positives_and_covers_more_secret_names(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -364,10 +377,11 @@ class ScaffoldDxmTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             structure = (root / "项目文件结构说明.md").read_text(encoding="utf-8")
+            entries = {entry["path"]: entry for entry in inventory_payload(structure)["entries"]}
             for name in sensitive:
-                self.assertRegex(structure, rf"`{re.escape(name)}`：运行态或敏感数据")
+                self.assertEqual(entries[name]["note"], "sensitive-name-not-expanded")
             for name in safe:
-                self.assertRegex(structure, rf"`{re.escape(name)}`：项目文件")
+                self.assertEqual(entries[name]["note"], "project-file")
 
     def test_inventory_skips_common_tooling_directories(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -381,9 +395,10 @@ class ScaffoldDxmTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             structure = (root / "项目文件结构说明.md").read_text(encoding="utf-8")
+            entries = {entry["path"]: entry for entry in inventory_payload(structure)["entries"]}
             for name in [".venv", "venv", ".idea", ".vscode", ".pytest_cache", ".tox"]:
-                self.assertRegex(structure, rf"`{re.escape(name)}/`：依赖、构建或工具目录")
-                self.assertNotRegex(structure, rf"`{re.escape(name)}/nested/`")
+                self.assertEqual(entries[name]["note"], "tool-or-build-state-not-expanded")
+                self.assertNotIn(f"{name}/nested", entries)
 
     def test_existing_start_marker_without_end_marker_fails_loudly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -607,7 +622,8 @@ class ScaffoldDxmTests(unittest.TestCase):
 
             result = self.run_scaffold(root, "--baseline", str(baseline))
 
-            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.returncode, 3, result.stderr)
+            self.assertIn("DXM scaffold status: PARTIAL", result.stdout)
             content = chain.read_text(encoding="utf-8")
             self.assertTrue(content.startswith("# Manual chain\n\nkeep this"))
             self.assertEqual(content.count("DXM-PROJECT-BASELINE:START"), 1)
@@ -660,15 +676,23 @@ class ScaffoldDxmTests(unittest.TestCase):
             self.assertIn("not valid UTF-8", result.stderr)
             self.assertFalse((root / "AGENTS.md").exists())
 
-    def test_scaffold_without_baseline_reports_partial_not_ready(self) -> None:
+    def test_v2_requires_an_explicit_write_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "partial-project"
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), "--root", str(root), "--output", "json"],
+                cwd=REPO_ROOT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+                check=False,
+            )
 
-            result = self.run_scaffold(root)
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("DXM scaffold status: PARTIAL", result.stdout)
-            self.assertNotIn("DXM scaffold status: READY", result.stdout)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["error_code"], "DXM_E_MODE_REQUIRED")
+            self.assertFalse(root.exists())
 
     def test_init_mode_requires_valid_baseline_before_any_write(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1048,9 +1072,10 @@ class ScaffoldDxmTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             structure = (root / "项目文件结构说明.md").read_text(encoding="utf-8")
-            self.assertRegex(structure, r"`src/`：项目目录")
-            self.assertRegex(structure, r"`src/app/`：项目目录")
-            self.assertNotRegex(structure, r"`src/app/main\\.py`")
+            entries = {entry["path"]: entry for entry in inventory_payload(structure)["entries"]}
+            self.assertEqual(entries["src"]["note"], "project-directory")
+            self.assertEqual(entries["src/app"]["note"], "project-directory")
+            self.assertNotIn("src/app/main.py", entries)
 
     def test_self_test_runs_packaged_smoke_checks(self) -> None:
         result = subprocess.run(
@@ -1241,7 +1266,7 @@ class ScaffoldDxmTests(unittest.TestCase):
             stderr = io.StringIO()
             old_argv = sys.argv
             try:
-                sys.argv = [str(SCRIPT), "--root", str(root), "--trellis"]
+                sys.argv = [str(SCRIPT), "--root", str(root), "--mode", "scaffold-only", "--trellis"]
                 with redirect_stdout(stdout), redirect_stderr(stderr):
                     exit_code = module.main()
             finally:

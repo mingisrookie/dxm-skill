@@ -1,5 +1,47 @@
 # 更新日志
 
+## v2.0.0 - 2026-08-03
+
+### 新增
+
+- 新增 `dxm.py` 产品命令面：`init`、`scaffold-only`、`audit` / `status`、`doctor` 与显式 `recover` 共用核心实现，并提供稳定 JSON 输出。
+- 新增 `contract/policy.json` 和标准库 policy loader，集中限定 inventory、Trellis 输入、lock 与 profile 的边界；baseline 支持 `lite`、`standard`（默认）和 `high-assurance`。
+- 新增项目锁、同目录原子替换、transaction journal/backup 与恢复链路；中断写入或 stale lock 不再允许下一次 scaffold 直接叠加。
+- 新增 Git worktree 本地状态保护：维护可移植 `.gitignore` 托管块、审计 `.dxm/` 忽略/跟踪状态、绝不自动执行 `git rm --cached`。
+- 新增安全 inventory renderer：文件名只作为 JSON 数据输出，不读取文件内容，默认跳过工具状态目录并受深度、条目、字节与超时上限约束。
+
+### 变更
+
+- **P0 修复：** 显式 `--mode init` 的退出码现在严格等于 post-write readiness：`READY=0`、`BROKEN=2`、`PARTIAL=3`、`ABSENT=4`；`--output json` 分离 `operation_status`、`readiness`、实际 `exit_code`、`readiness_exit_code` 与 `issues`，并在参数边界错误时也返回稳定的 `DXM_E_INVALID_ARGUMENTS` JSON。
+- v2 写入命令必须明确 `--mode init` 或 `--mode scaffold-only`；旧式省略 mode 调用返回 `DXM_E_MODE_REQUIRED`，`scaffold-only` 仅报告 `NOT_EVALUATED`。
+- baseline/run/receipt 收紧未知字段、扩展命名空间、项目相对路径和 Windows 可移植性校验；receipt 的顶层、requirements、检查对象和 structured observation 只允许已声明字段，普通输入错误使用稳定错误码，默认不泄露 traceback。
+- `.gitignore` 仅刷新完整、单独成行且顺序正确的 DXM marker；含尾随规则、嵌入 marker 或逆序 marker 一律拒绝，避免吞掉人工 ignore 规则。
+- inventory 改为流式早停，并按最终 JSON（含截断元数据）计算 byte cap；宽目录、慢枚举和极小边界不再先无界排序或超过声明上限。
+- journal recovery 绑定安全 operation ID、journal filename、entry schema 和 backup layout；恢复、audit、doctor 与 receipt 共同 fail closed 处理 pending/malformed transaction、unsafe state topology 和 stale lock。
+- Trellis `session_auto_commit` 更新改为受限的顶层 Boolean adapter；无法安全理解的 YAML 形态会拒绝而不是用正则猜测改写。
+- bounded grill、DXM 模板和 Trellis 注入统一为“本地证据优先、单批 0–3 阻塞问题、full grilling 必须显式 opt-in”；本地 independent review 明确仅是证据一致性/reviewer 字段分离门。
+- CI 改为最小权限、完整 SHA pin，并覆盖 Ubuntu / Windows / macOS 的 Python 3.10、3.12、3.14、self-test 与 core entry-point smoke。
+
+### 修复
+
+- 修复 `init` 写入后审计为 `PARTIAL` / `BROKEN` 仍返回 0 的 P0 假成功。
+- 修复目标 Git 仓中 `.dxm/` 可意外进入跟踪、inventory 文件名可破坏 Markdown、写入过程中断无恢复路径、普通本地 I/O 缺少统一错误契约等问题。
+- 修复 profile/provenance 语义过度承诺：`high-assurance` 只要求记录外部可信边界验证过的 provenance 形状，本地 validator 不声称认证远端身份。
+
+### 验证
+
+- `python -B -m unittest discover -s tests -q`：230 项通过，2 项因当前 Windows 账号缺少目录 symlink 权限跳过；另执行 `scaffold_dxm.py --self-test`、core-only copy smoke、`dxm.py --version`、`validate_dxm.py audit --root . --require-trellis --json` 与 `git diff --check`。
+- v2 回归覆盖 P0 退出码/JSON、Git privacy、lock/recovery crash window、安全 inventory、schema/path/profile、Trellis 配置 adapter 与 core package smoke。
+- 发布时额外验证独立 reviewer PASS、归档 receipt、tag、GitHub Release/Latest 和 release asset 的干净再下载 SHA-256 manifest。
+
+### 已知限制与迁移
+
+- v2 不接受没有 `--mode` 的写入调用；调用方必须改为 `--mode init` 或 `--mode scaffold-only`。`init` 的 PARTIAL/BROKEN 非零退出应由自动化正确处理。
+- DXM 可安全检查并恢复自己管理的文件事务；外部 `trellis init`、Git index 和远程 Release 都是显式边界，不会被本地 rollback 伪装为已恢复。
+- local review/hash 不能证明可信身份；高保障项目仍需要在独立 CI/OIDC 或等效边界完成实际 provenance 验证。
+
+**完整更新记录：** [v1.2.0...v2.0.0](https://github.com/mingisrookie/dxm-skill/compare/v1.2.0...v2.0.0)
+
 ## v1.2.0 - 2026-08-01
 
 ### 新增

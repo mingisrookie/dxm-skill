@@ -51,7 +51,11 @@ PARTIAL 工作区上的续开发请求默认走 `task`：沿用既有基线产�
 
 已有人工内容不得静默覆盖。真实 Markdown marker 孤立、重复、交叉、乱序、非规范或未闭合时停止，不得继续追加；完整 fenced/inline code 中的 marker 示例不算活动块，未闭合 fence 不能隐藏错误。baseline/run/receipt 会规范化 credential-like 字段名并向嵌套容器传播检查；除显式环境变量引用或白名单脱敏占位外，凭据上下文中的 literal 必须拒绝，错误不得回显 key/value。建档后用只读 audit 区分 `ABSENT` / `PARTIAL` / `READY` / `BROKEN`；`PARTIAL`、`BROKEN` 不得输出成功式下一步。
 
-脚本写入必须显式携带模式锁：`init` 使用 `--mode init --baseline <baseline.json>`，缺 baseline 时必须在任何写入前失败；模板专用使用 `--mode scaffold-only`，不得携带 baseline，输出 `readiness: NOT_EVALUATED`。不带 `--mode` 的旧 CLI 只用于兼容，不能证明完成了 init gate。
+脚本写入必须显式携带模式锁：`init` 使用 `--mode init --baseline <baseline.json>`，缺 baseline 时必须在任何写入前失败；模板专用使用 `--mode scaffold-only`，不得携带 baseline，输出 `readiness: NOT_EVALUATED`。DXM v2 不再接受无 `--mode` 的写入调用；它必须以 `DXM_E_MODE_REQUIRED` 失败。显式 `init` 的进程退出码必须反映最终审计：`READY=0`、`BROKEN=2`、`PARTIAL=3`、`ABSENT=4`；`--output json` 同时输出 operation 与 readiness，自动化不得只把“文件已写入”当作 READY。
+
+写入引擎使用项目锁、同目录临时文件 + `os.replace`、事务 journal 和可显式执行的 `--recover`；检测到未完成事务或 stale lock 时先恢复，不得继续叠加写入。Git worktree 中脚手架幂等维护 `.gitignore` 的 `# DXM:START` / `# DXM:END` 块来忽略 `.dxm/`；审计发现已跟踪的 DXM 本地状态时必须 BROKEN，只提示人工处理，绝不擅自 `git rm --cached`。文件快照是受限 JSON 数据，不把工作区文件名当 Markdown/Agent 指令：默认跳过工具状态目录，并限制深度、条目、字节和耗时。
+
+baseline 可选 `profile` 为 `lite`、`standard`（默认）或 `high-assurance`。本地 `independent_review` 是 reviewer-separation / evidence-consistency gate，不是可信身份认证；`high-assurance` 还要求在独立 CI/OIDC 或等效外部边界验证并记录 `external_provenance`，本地 SHA-256 只能校验自洽性。
 
 ## Trellis 路由
 
@@ -83,7 +87,7 @@ PARTIAL 工作区上的续开发请求默认走 `task`：沿用既有基线产�
 
 run outcomes 决定本任务 requirements/evidence；`baseline_impact` 必须把 baseline 每个 acceptance ID 精确标为 `affected`（绑定 outcome ID）或 `not_affected`（写理由），不能把未触及项填成这次 freshly passed。service 要 listener + health + original-symptom E2E；UI 要适用时的 approved reference + rendered screenshot + navigation/hit-test + regression；online/deployed 要 real entry-point readback；restart durability 要 restart/recovery。单测或配置/源码检查不能单独证明这些运行态声明。
 
-运行态 evidence kind 至少含一个 **structured observation**：`observed_at`、`subject`、`method`、`result`、`summary`；可选项目内 `path` 必须配 `sha256`。isolated 证据还要 `final_artifact: true` 和 `decisive_branch`，只启动进程/窗口不算 E2E。release/deploy/live-data/multi-module architecture 等 high-risk run 必须 `independent_review_required: true`，并在回执提供由不同 Agent 完成的新鲜 `independent_review` PASS；回执用 `artifact_sha256` 绑定 task/run 目录的 canonical `independent-review.md`，其顶层 `reviewer_id`、带时区 `reviewed_at` 和 `verdict: PASS` 必须与回执一致。普通小修不强制。
+运行态 evidence kind 至少含一个 **structured observation**：`observed_at`、`subject`、`method`、`result`、`summary`；可选项目内 `path` 必须配 `sha256`。isolated 证据还要 `final_artifact: true` 和 `decisive_branch`，只启动进程/窗口不算 E2E。release/deploy/live-data/multi-module architecture 等 high-risk run 必须 `independent_review_required: true`，并在回执提供由不同 Agent 完成的新鲜 `independent_review` PASS；回执用 `artifact_sha256` 绑定 task/run 目录的 canonical `independent-review.md`，其顶层 `reviewer_id`、带时区 `reviewed_at` 和 `verdict: PASS` 必须与回执一致。该本地门只证明文件间一致和 reviewer 字段分离，不证明可信身份；`high-assurance` 另需可外部验证的 provenance。普通小修不强制。
 
 `init` 或 `task` 报告完成前，必须生成并通过 `schema_version: 2` completion receipt。它用 `run_id` + `run_sha256` 绑定 canonical run，requirements 精确覆盖 run outcomes，并同步 `baseline_impact`、`unverified_boundaries`、证据、质量检查、Trellis 和 Git 事实。默认拒绝 v1；`--legacy-v1` 只做历史审计，不能证明当前完成。run-only 回执位于 `.dxm/runs/<run_id>/completion.json`。Trellis 必须先在无阻断项的最终 `check.md` 中把 `<!-- DXM-CHECK:PASS -->` 写成文件首个非空、顶格独立且全文唯一的行；再按 `finish` → `task.py archive <task> --no-commit` → `.trellis/tasks/archive/<YYYY-MM>/<task>/completion.json` 收口。缺证据、陈旧 observation、run/impact 漂移、错误路径/哈希、缺独立审查或虚假状态均不得声称完成。
 
@@ -116,12 +120,12 @@ run outcomes 决定本任务 requirements/evidence；`baseline_impact` 必须把
 
 Trellis 是 DXM 下面的中大型任务持久层，不替代本目录长期文档。
 
-- 小修、只读排查、单点 bug、轻量文档调整：默认按 DXM inline run-only 处理，创建 `.dxm/runs/<run_id>/run.json`，不强制 Trellis task。
+- 小修、只读排查、单点 bug、轻量文档调整：默认按 DXM inline **run-only** 处理，创建 `.dxm/runs/<run_id>/run.json`，不强制 Trellis task。
 - 新功能、架构变化、跨多文件重构、长周期任务：先用 DXM core 做本地证据优先、单批 0–3 个阻塞问题的有界 project-grill；用户已批准 Trellis 时，再把结论落到 `.trellis/tasks/<task>/prd.md`。
 - `grill-with-docs` 可在已安装且任务描述匹配时用于已有代码/文档的有界查证，但仍必须遵守单批 0–3 个阻塞问题；full `grilling` / legacy `grill-me` 只有用户 explicit opt-in 完整/穷举澄清时才调用。它们都不是 Trellis 硬依赖。
 - 提问前从第一性原理判断真实目标、硬约束、本地可查事实和仍阻塞的问题，并质疑隐藏假设、过度方案、伪约束和用户给出的实现偏置；本地可查事实不得反问。
 - 用户明确说 `scaffold only`、`先别问`、`只分析` 时，不进入 Trellis，不擅自改文件。
-- 每次 Trellis 任务完成前必须执行对抗性检查；high-risk 还要不同 Agent 的 `independent_review` PASS。通过后按 `finish` → `archive <task> --no-commit` → schema_version: 2 completion receipt 校验收口。
+- 每次 Trellis 任务完成前必须执行对抗性检查；high-risk 还要不同 Agent 的 canonical `independent-review.md` PASS，并由 receipt 绑定其 `artifact_sha256` 与 reviewer/time/PASS 元数据。它是本地 evidence-consistency/reviewer-separation gate，不是可信身份认证；`high-assurance` 另需独立可信边界的 external provenance。通过后把最终 `check.md` 的文件首个非空行写成顶格独立且全文唯一的 `<!-- DXM-CHECK:PASS -->`，再按 `finish` → `archive <task> --no-commit` → schema_version: 2 completion receipt 收口。
 - Trellis 不得自动 stage/commit/push/PR；提交和推送仍需用户明确授权。
 
 <!-- DXM-TRELLIS:END -->

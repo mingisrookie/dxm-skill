@@ -14,6 +14,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -27,6 +28,8 @@ from dxm_contract import (  # noqa: E402 - keep the packaged sibling import dete
     BASELINE_BLOCK_START,
     BROKEN,
     ContractError,
+    EXIT_INVALID,
+    EXIT_PARTIAL,
     PARTIAL,
     READY,
     audit_project,
@@ -37,6 +40,21 @@ from dxm_contract import (  # noqa: E402 - keep the packaged sibling import dete
     validate_managed_markers,
     validate_marker_layout,
 )
+from dxm_inventory import project_inventory as bounded_project_inventory  # noqa: E402
+from dxm_inventory import safe_markdown_label  # noqa: E402
+from dxm_git import GitPrivacyError, is_git_worktree, managed_gitignore_content  # noqa: E402
+from dxm_io import (  # noqa: E402
+    DxmIoError,
+    ERROR_WRITE_FAILED,
+    ERROR_RECOVERY_REQUIRED,
+    ProjectLock,
+    ProjectTransaction,
+    atomic_replace_text,
+    normalize_lf as io_normalize_lf,
+    pending_transaction_states,
+    recover_transactions,
+)
+from dxm_policy import LIMITS  # noqa: E402
 
 
 def configure_stdio() -> None:
@@ -67,9 +85,10 @@ TRELLIS_WORKFLOW_OVERRIDE_END = "<!-- DXM-TRELLIS-WORKFLOW-OVERRIDE:END -->"
 DXM_DOC_BLOCK_START = "<!-- DXM-DOC-RULES:START -->"
 DXM_DOC_BLOCK_END = "<!-- DXM-DOC-RULES:END -->"
 
-EXIT_INVALID = 2
 EXIT_TRELLIS_UNAVAILABLE = 3
 EXIT_TRELLIS_FAILED = 4
+
+_ACTIVE_TRANSACTION: ProjectTransaction | None = None
 
 SKIP_DIRS = {
     ".git",
@@ -176,7 +195,7 @@ Trellis 是 DXM 下面的中大型任务持久层，不替代本目录长期文�
 - `grill-with-docs` 可在已安装且任务描述匹配时用于已有代码/文档的有界查证，但仍必须遵守单批 0–3 个阻塞问题；full `grilling` / legacy `grill-me` 只有用户 explicit opt-in 完整/穷举澄清时才调用。它们都不是 Trellis 硬依赖。
 - 提问前从第一性原理判断真实目标、硬约束、本地可查事实和仍阻塞的问题，并质疑隐藏假设、过度方案、伪约束和用户给出的实现偏置；本地可查事实不得反问。
 - 用户明确说 `scaffold only`、`先别问`、`只分析` 时，不进入 Trellis，不擅自改文件。
-- 每次 Trellis 任务完成前必须执行对抗性检查；high-risk 还要不同 Agent 的 canonical `independent-review.md` PASS，并由 receipt 绑定其 `artifact_sha256` 与 reviewer/time/PASS 元数据。通过后把最终 `check.md` 的文件首个非空行写成顶格独立且全文唯一的 `<!-- DXM-CHECK:PASS -->`，再按 `finish` → `archive <task> --no-commit` → schema_version: 2 completion receipt 收口。
+- 每次 Trellis 任务完成前必须执行对抗性检查；high-risk 还要不同 Agent 的 canonical `independent-review.md` PASS，并由 receipt 绑定其 `artifact_sha256` 与 reviewer/time/PASS 元数据。它是本地 evidence-consistency/reviewer-separation gate，不是可信身份认证；`high-assurance` 另需独立可信边界的 external provenance。通过后把最终 `check.md` 的文件首个非空行写成顶格独立且全文唯一的 `<!-- DXM-CHECK:PASS -->`，再按 `finish` → `archive <task> --no-commit` → schema_version: 2 completion receipt 收口。
 - Trellis 不得自动 stage/commit/push/PR；提交和推送仍需用户明确授权。
 
 {TRELLIS_BLOCK_END}
@@ -197,7 +216,7 @@ Trellis 只用于中大型开发任务的 PRD、任务状态和检查沉淀。�
 | 用户明确 scaffold only / 先别问 | 只 scaffold，不 grill，不建 task |
 
 启用 Trellis 时必须保持 `session_auto_commit: false`，并遵守本项目 Git/PR 授权规则。
-每个可写 task 先建 `.dxm/runs/<run_id>/run.json`；source-only 必须记录 `unverified_boundaries`。运行态声明用带 `observed_at` 的 structured observation；high-risk 要 hash-bound canonical `independent-review.md`。Trellis 最后按 `finish` → `archive <task> --no-commit` → schema_version: 2 归档回执收口。
+每个可写 task 先建 `.dxm/runs/<run_id>/run.json`；source-only 必须记录 `unverified_boundaries`。运行态声明用带 `observed_at` 的 structured observation；high-risk 要 hash-bound canonical `independent-review.md`，但它只证明本地一致性；`high-assurance` 还要 external provenance。Trellis 最后按 `finish` → `archive <task> --no-commit` → schema_version: 2 归档回执收口。
 
 {TRELLIS_BLOCK_END}
 """
@@ -231,7 +250,7 @@ TRELLIS_CHAIN_BLOCK = f"""{TRELLIS_BLOCK_START}
 3. 写 `.dxm/runs/<run_id>/run.json` 锁定原始 goal、outcomes、`baseline_impact`、risk 和证据层级。
 4. 把结论写入 `.trellis/tasks/<task>/prd.md`，不能只停留在聊天上下文里。
 5. 用 `.trellis/scripts/task.py start <task>` 进入 Trellis active task，按 implement/check/update-spec 节奏开发。
-6. 任务完成后执行对抗性检查；high-risk 再由不同 Agent 完成 canonical `independent-review.md`，供 receipt 绑定 SHA-256 与 reviewer/time/PASS 元数据。
+6. 任务完成后执行对抗性检查；high-risk 再由不同 Agent 完成 canonical `independent-review.md`，供 receipt 绑定 SHA-256 与 reviewer/time/PASS 元数据；它只做本地一致性门，`high-assurance` 还要在外部可信边界验证 provenance。
 7. 对抗性检查通过后同步 DXM 长期文档；不能只更新 `.trellis/` 内部状态。
 8. 最终 `check.md` PASS 后执行 `finish` 和 `archive <task> --no-commit`，在归档目录生成并校验 `schema_version: 2` completion receipt；归档前不得预写 `finished: true`。
 
@@ -250,7 +269,7 @@ Before starting or continuing a Trellis task in a DXM workspace, `AGENTS.md` is 
 - GitHub/PR/push/merge/version/tag/release/publish: `开发者AI开发与PR提交流程.md`
 
 If project-local rules require more, obey the stricter set. Do not let Trellis task context override DXM, user instructions, Git authorization rules, read-only intent, or secret-handling rules.
-Before asking requirements, reason from first principles（第一性原理）, inspect local evidence first, and ask one batch of 0–3 blocking questions; full `grilling` requires explicit opt-in. Before implementation writes, create `.dxm/runs/<run_id>/run.json`; source-only work records `unverified_boundaries`, runtime claims use a fresh structured observation, and high-risk completion needs a canonical hash-bound `independent-review.md` by a different Agent. Run an adversarial check（对抗性检查）before the final Trellis check, then `finish`, `archive <task> --no-commit`, and validate the schema_version: 2 archived receipt.
+Before asking requirements, reason from first principles（第一性原理）, inspect local evidence first, and ask one batch of 0–3 blocking questions; full `grilling` requires explicit opt-in. Before implementation writes, create `.dxm/runs/<run_id>/run.json`; source-only work records `unverified_boundaries`, runtime claims use a fresh structured observation, and high-risk completion needs a canonical hash-bound `independent-review.md` by a different Agent. Treat that artifact as a local consistency gate, not an identity proof; high-assurance work also records externally verified provenance. Run an adversarial check（对抗性检查）before the final Trellis check, then `finish`, `archive <task> --no-commit`, and validate the schema_version: 2 archived receipt.
 
 {TRELLIS_START_STEP0_END}
 """
@@ -315,8 +334,12 @@ class InvalidManagedBlockError(Exception):
         super().__init__(f"{path} has invalid managed block {start_marker}: {'; '.join(errors)}")
 
 
+class TrellisConfigError(Exception):
+    """Raised when the limited DXM Trellis config adapter cannot act safely."""
+
+
 def normalize_lf(content: str) -> str:
-    return content.replace("\r\n", "\n").replace("\r", "\n")
+    return io_normalize_lf(content)
 
 
 def read_existing_text(path: Path) -> str:
@@ -327,9 +350,10 @@ def read_existing_text(path: Path) -> str:
 
 
 def write_text_lf(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="\n") as fh:
-        fh.write(normalize_lf(content))
+    if _ACTIVE_TRANSACTION is not None:
+        _ACTIVE_TRANSACTION.write_text(path, content)
+        return
+    atomic_replace_text(path, content)
 
 
 def is_reparse_or_symlink(path: Path) -> bool:
@@ -492,48 +516,66 @@ def read_template(name: str) -> str:
     return normalize_lf((template_dir / f"{name}.template").read_text(encoding="utf-8"))
 
 
-def project_inventory(root: Path, depth: int = 1) -> str:
-    if not root.exists():
-        return "- 当前目录尚不存在；实际 scaffold 会先创建项目根目录。"
-
-    lines: list[str] = []
-
-    def visit(directory: Path, current_depth: int, prefix: str = "") -> None:
-        for child in sorted(directory.iterdir(), key=lambda p: p.name.lower()):
-            name = child.name
-            display = f"{prefix}{name}"
-            if is_reparse_or_symlink(child):
-                lines.append(f"- `{display}`：链接或重解析点；为保持 root/scope lock，不展开。")
-                continue
-            if name in SKIP_DIRS:
-                lines.append(f"- `{display}/`：依赖、构建或工具目录；通常不展开维护。")
-                continue
-            if is_sensitive_name(name, is_file=child.is_file()):
-                suffix = "/" if child.is_dir() else ""
-                lines.append(f"- `{display}{suffix}`：运行态或敏感数据；只说明用途，不回显真实内容。")
-                continue
-            suffix = "/" if child.is_dir() else ""
-            if child.is_dir():
-                lines.append(f"- `{display}/`：项目目录；首次 /dxm 生成后需要补充职责说明。")
-                if current_depth < depth:
-                    visit(child, current_depth + 1, f"{display}/")
-            else:
-                lines.append(f"- `{display}`：项目文件；首次 /dxm 生成后需要补充职责说明。")
-
-    visit(root, 1)
-    return "\n".join(lines) if lines else "- 当前目录为空；开始开发前补充文件结构。"
-
-
-def render(content: str, root: Path, inventory_depth: int = 1) -> str:
-    return (
-        content.replace("{{project_name}}", root.name)
-        .replace("{{generated_date}}", datetime.now().strftime("%Y-%m-%d"))
-        .replace("{{file_inventory}}", project_inventory(root, inventory_depth))
+def project_inventory(
+    root: Path,
+    depth: int = 1,
+    *,
+    max_entries: int = LIMITS["inventory_max_entries"],
+    max_bytes: int = LIMITS["inventory_max_bytes"],
+    timeout_seconds: int = LIMITS["inventory_timeout_seconds"],
+) -> str:
+    return bounded_project_inventory(
+        root,
+        depth=depth,
+        max_entries=max_entries,
+        max_bytes=max_bytes,
+        timeout_seconds=timeout_seconds,
+        skip_dirs=SKIP_DIRS,
+        is_sensitive_name=lambda name, is_file: is_sensitive_name(name, is_file=is_file),
     )
 
 
-def dxm_block(root: Path, inventory_depth: int = 1) -> str:
-    return render(read_template("AGENTS.md"), root, inventory_depth)
+def render(
+    content: str,
+    root: Path,
+    inventory_depth: int = 1,
+    *,
+    inventory_max_entries: int = LIMITS["inventory_max_entries"],
+    inventory_max_bytes: int = LIMITS["inventory_max_bytes"],
+    inventory_timeout_seconds: int = LIMITS["inventory_timeout_seconds"],
+) -> str:
+    return (
+        content.replace("{{project_name}}", safe_markdown_label(root.name))
+        .replace("{{generated_date}}", datetime.now().strftime("%Y-%m-%d"))
+        .replace(
+            "{{file_inventory}}",
+            project_inventory(
+                root,
+                inventory_depth,
+                max_entries=inventory_max_entries,
+                max_bytes=inventory_max_bytes,
+                timeout_seconds=inventory_timeout_seconds,
+            ),
+        )
+    )
+
+
+def dxm_block(
+    root: Path,
+    inventory_depth: int = 1,
+    *,
+    inventory_max_entries: int = LIMITS["inventory_max_entries"],
+    inventory_max_bytes: int = LIMITS["inventory_max_bytes"],
+    inventory_timeout_seconds: int = LIMITS["inventory_timeout_seconds"],
+) -> str:
+    return render(
+        read_template("AGENTS.md"),
+        root,
+        inventory_depth,
+        inventory_max_entries=inventory_max_entries,
+        inventory_max_bytes=inventory_max_bytes,
+        inventory_timeout_seconds=inventory_timeout_seconds,
+    )
 
 
 def refresh_managed_block(path: Path, content: str, start_marker: str, end_marker: str, dry_run: bool = False) -> str:
@@ -561,8 +603,18 @@ def ensure_agents(
     dry_run: bool = False,
     refresh_blocks: bool = False,
     inventory_depth: int = 1,
+    *,
+    inventory_max_entries: int = LIMITS["inventory_max_entries"],
+    inventory_max_bytes: int = LIMITS["inventory_max_bytes"],
+    inventory_timeout_seconds: int = LIMITS["inventory_timeout_seconds"],
 ) -> str:
-    content = dxm_block(root, inventory_depth)
+    content = dxm_block(
+        root,
+        inventory_depth,
+        inventory_max_entries=inventory_max_entries,
+        inventory_max_bytes=inventory_max_bytes,
+        inventory_timeout_seconds=inventory_timeout_seconds,
+    )
     if dry_run:
         if force or not path.exists():
             return "would-create" if not force else "would-write"
@@ -636,6 +688,29 @@ def positive_int(value: str) -> int:
     if parsed < 1:
         raise argparse.ArgumentTypeError("must be >= 1")
     return parsed
+
+
+def bounded_positive_int(maximum: int):
+    def parse(value: str) -> int:
+        parsed = positive_int(value)
+        if parsed > maximum:
+            raise argparse.ArgumentTypeError(f"must be <= {maximum}")
+        return parsed
+
+    return parse
+
+
+def valid_trellis_user(value: str) -> str:
+    candidate = value.strip()
+    if not candidate:
+        raise argparse.ArgumentTypeError("must not be empty")
+    if len(candidate) > LIMITS["trellis_user_max_length"]:
+        raise argparse.ArgumentTypeError(
+            f"must be <= {LIMITS['trellis_user_max_length']} characters"
+        )
+    if any(ord(character) < 32 or ord(character) == 127 for character in candidate):
+        raise argparse.ArgumentTypeError("must not contain control characters")
+    return candidate
 
 
 def run_self_test() -> None:
@@ -742,34 +817,91 @@ def run_trellis_init(root: Path, developer: str, timeout_seconds: int) -> tuple[
     return (f"failed-exit-{process.returncode}", output)
 
 
+_TRELLIS_ACTIVE_SCALAR_RE = re.compile(
+    r"^session_auto_commit[ \t]*:[ \t]*(?P<value>[^#\r\n]*?)(?:[ \t]+#.*)?$"
+)
+_TRELLIS_COMMENTED_SCALAR_RE = re.compile(
+    r"^#[ \t]*session_auto_commit[ \t]*:[ \t]*(?P<value>[^#\r\n]*?)(?:[ \t]+#.*)?$"
+)
+_TRELLIS_QUOTED_KEY_RE = re.compile(r"^[\"']session_auto_commit[\"'][ \t]*:")
+
+
+def _trellis_boolean_scalar(value: str) -> bool:
+    normalized = value.strip().casefold()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    raise TrellisConfigError(
+        "Trellis config has a non-boolean top-level session_auto_commit value; use Trellis' official config command"
+    )
+
+
+def _normalize_trellis_session_auto_commit(existing: str) -> str:
+    """Safely update only an unquoted top-level Boolean YAML scalar.
+
+    DXM does not attempt to parse arbitrary YAML.  The adapter rejects quoted
+    keys, aliases, block scalars, or any other unsupported shape instead of
+    applying a broad regular-expression substitution.
+    """
+
+    lines = normalize_lf(existing).splitlines(keepends=True)
+    active_indexes: list[int] = []
+    commented_indexes: list[int] = []
+    for index, line in enumerate(lines):
+        raw = line.rstrip("\n")
+        if raw.startswith((" ", "\t")):
+            continue
+        if _TRELLIS_QUOTED_KEY_RE.match(raw):
+            raise TrellisConfigError(
+                "Trellis config uses a quoted session_auto_commit key; use Trellis' official config command"
+            )
+        active = _TRELLIS_ACTIVE_SCALAR_RE.fullmatch(raw)
+        if active is not None:
+            _trellis_boolean_scalar(active.group("value"))
+            active_indexes.append(index)
+            continue
+        commented = _TRELLIS_COMMENTED_SCALAR_RE.fullmatch(raw)
+        if commented is not None:
+            _trellis_boolean_scalar(commented.group("value"))
+            commented_indexes.append(index)
+
+    desired = "session_auto_commit: false\n"
+    if active_indexes:
+        first = active_indexes[0]
+        lines[first] = desired
+        for index in reversed(active_indexes[1:]):
+            del lines[index]
+        return "".join(lines)
+    if commented_indexes:
+        first = commented_indexes[0]
+        lines[first] = desired
+        for index in reversed(commented_indexes[1:]):
+            del lines[index]
+        return "".join(lines)
+    return "".join(lines).rstrip("\n") + "\n\n" + desired
+
+
+def _trellis_session_auto_commit_is_disabled(content: str) -> bool:
+    active_values: list[bool] = []
+    for line in normalize_lf(content).splitlines():
+        if line.startswith((" ", "\t")):
+            continue
+        active = _TRELLIS_ACTIVE_SCALAR_RE.fullmatch(line)
+        if active is not None:
+            active_values.append(_trellis_boolean_scalar(active.group("value")))
+    return active_values == [False]
+
+
 def ensure_session_auto_commit_disabled(root: Path, dry_run: bool = False) -> str:
     config = root / ".trellis" / "config.yaml"
     if not config.exists():
         return "missing-config"
 
     existing = read_existing_text(config)
-    desired = "session_auto_commit: false"
-    # Horizontal-whitespace-only anchors: \s would match newlines in (?m) mode and
-    # swallow a preceding blank line, breaking idempotency on repeated runs.
-    active_re = re.compile(r"(?m)^session_auto_commit[^\S\n]*:[^\S\n]*.*$")
-    commented_re = re.compile(r"(?m)^#[^\S\n]*session_auto_commit[^\S\n]*:.*$")
-    if active_re.search(existing):
-        seen_active = False
-
-        def collapse_active(_match: re.Match[str]) -> str:
-            nonlocal seen_active
-            if seen_active:
-                return ""
-            seen_active = True
-            return desired
-
-        updated = active_re.sub(collapse_active, existing)
-    elif commented_re.search(existing):
-        # Trellis ships the key commented out (`# session_auto_commit: true`);
-        # uncomment in place instead of appending a contradictory duplicate.
-        updated = commented_re.sub(desired, existing, count=1)
-    else:
-        updated = existing.rstrip("\n") + "\n\n" + desired + "\n"
+    updated = _normalize_trellis_session_auto_commit(existing)
+    if not _trellis_session_auto_commit_is_disabled(updated):
+        raise TrellisConfigError("Trellis config adapter could not verify session_auto_commit: false")
     if updated != existing:
         if dry_run:
             return "would-update"
@@ -881,6 +1013,36 @@ def validate_update_inputs(
             check_managed_blocks(path, content, scaffold_marker_pairs(filename))
 
 
+def ensure_dxm_gitignore(root: Path, *, dry_run: bool = False) -> tuple[str, str] | None:
+    """Guarantee a portable local-state ignore rule when the target is Git-backed.
+
+    This never calls ``git rm --cached``: pre-existing tracked DXM state is a
+    human ownership decision and is surfaced by the post-write audit instead.
+    """
+
+    if not root.exists():
+        return None
+    worktree = is_git_worktree(root)
+    if worktree is False:
+        return None
+    if worktree is None:
+        return (".gitignore DXM privacy", "git-privacy-unavailable")
+    path = root / ".gitignore"
+    validate_managed_path(root, path)
+    existing = read_existing_text(path) if path.exists() else None
+    desired, status = managed_gitignore_content(existing)
+    if dry_run:
+        if existing is None:
+            status = "would-create"
+        elif desired != existing:
+            status = "would-append-managed-block" if "# DXM:START" not in existing else "would-refresh-managed-block"
+        else:
+            status = "would-skip-existing"
+    elif desired != existing:
+        write_text_lf(path, desired)
+    return (".gitignore DXM privacy", status)
+
+
 def scaffold(
     root: Path,
     force: bool,
@@ -889,6 +1051,10 @@ def scaffold(
     trellis: bool = False,
     inventory_depth: int = 1,
     baseline: bool = False,
+    *,
+    inventory_max_entries: int = LIMITS["inventory_max_entries"],
+    inventory_max_bytes: int = LIMITS["inventory_max_bytes"],
+    inventory_timeout_seconds: int = LIMITS["inventory_timeout_seconds"],
 ) -> list[tuple[str, str]]:
     validate_update_inputs(root, force, refresh_blocks, trellis, baseline)
     if not dry_run:
@@ -896,9 +1062,26 @@ def scaffold(
     results: list[tuple[str, str]] = []
     for filename in FILES:
         target = root / filename
-        content = render(read_template(filename), root, inventory_depth)
+        content = render(
+            read_template(filename),
+            root,
+            inventory_depth,
+            inventory_max_entries=inventory_max_entries,
+            inventory_max_bytes=inventory_max_bytes,
+            inventory_timeout_seconds=inventory_timeout_seconds,
+        )
         if filename == "AGENTS.md":
-            status = ensure_agents(target, root, force, dry_run, refresh_blocks, inventory_depth)
+            status = ensure_agents(
+                target,
+                root,
+                force,
+                dry_run,
+                refresh_blocks,
+                inventory_depth,
+                inventory_max_entries=inventory_max_entries,
+                inventory_max_bytes=inventory_max_bytes,
+                inventory_timeout_seconds=inventory_timeout_seconds,
+            )
         elif dry_run:
             if force or not target.exists():
                 status = "would-write" if force else "would-create"
@@ -915,6 +1098,9 @@ def scaffold(
             write_text_lf(target, content)
             status = "written" if force else "created"
         results.append((filename, status))
+    gitignore_result = ensure_dxm_gitignore(root, dry_run=dry_run)
+    if gitignore_result is not None:
+        results.append(gitignore_result)
     return results
 
 
@@ -962,6 +1148,31 @@ def persist_project_baseline(
         (".dxm/project.json", baseline_status),
         ("项目完整链路说明.md project baseline", status_aliases.get(block_status, block_status)),
     ]
+
+
+def refresh_project_baseline_block(
+    root: Path,
+    data: dict[str, object],
+    *,
+    dry_run: bool = False,
+) -> list[tuple[str, str]]:
+    """Refresh only the rendered baseline block from an existing local baseline."""
+
+    chain_path = root / "项目完整链路说明.md"
+    validate_managed_path(root, chain_path)
+    block_status = append_block_once(
+        chain_path,
+        baseline_markdown(data),
+        BASELINE_BLOCK_START,
+        BASELINE_BLOCK_END,
+        dry_run=dry_run,
+        refresh_blocks=True,
+    )
+    status_aliases = {
+        "would-append-trellis-block": "would-append-baseline-block",
+        "appended-trellis-block": "appended-baseline-block",
+    }
+    return [("项目完整链路说明.md project baseline", status_aliases.get(block_status, block_status))]
 
 
 def print_trellis_notes(trellis_output: str) -> None:
@@ -1013,13 +1224,223 @@ def print_safe_update_error(
     )
 
 
+def _result_counts(results: list[tuple[str, str]]) -> tuple[int, int]:
+    written_statuses = {
+        "created",
+        "written",
+        "updated",
+        "refreshed-managed-block",
+        "appended-managed-block",
+        "appended-trellis-block",
+        "appended-baseline-block",
+    }
+    written = sum(1 for _, status in results if status in written_statuses)
+    skipped = sum(1 for _, status in results if "skip" in status)
+    return written, skipped
+
+
+def _visible_root(root: Path, redact_paths: bool) -> str:
+    return "$PROJECT_ROOT" if redact_paths else str(root)
+
+
+def _emit_payload(args: argparse.Namespace, payload: dict[str, object], *, stderr: bool = False) -> None:
+    if args.output == "json":
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    elif stderr:
+        print(f"Error: {payload['summary']}", file=sys.stderr)
+
+
+def _emit_failure(
+    args: argparse.Namespace,
+    *,
+    code: str,
+    summary: str,
+    exit_code: int = EXIT_INVALID,
+    root: Path | None = None,
+) -> int:
+    payload: dict[str, object] = {
+        "operation": "recover" if args.recover else (args.mode or "unknown"),
+        "operation_status": "failed",
+        "readiness": "NOT_EVALUATED",
+        "readiness_exit_code": None,
+        "exit_code": exit_code,
+        "issues": [summary],
+        "error_code": code,
+        "summary": summary,
+    }
+    if root is not None:
+        payload["root"] = _visible_root(root, args.redact_paths)
+    _emit_payload(args, payload, stderr=True)
+    return exit_code
+
+
+def _emit_scaffold_result(
+    args: argparse.Namespace,
+    root: Path,
+    results: list[tuple[str, str]],
+    audit: object | None,
+    trellis_exit: int,
+    trellis_output: str,
+) -> int:
+    readiness = "NOT_EVALUATED"
+    readiness_exit_code: int | None = None
+    issues: list[str] = []
+    if audit is not None and args.mode != "scaffold-only":
+        readiness = PARTIAL if trellis_exit and audit.state == READY else audit.state
+        readiness_exit_code = audit.exit_code if readiness == audit.state else EXIT_PARTIAL
+        issues = list(audit.issues)
+        if trellis_exit and readiness == PARTIAL and not issues:
+            issues.append("explicit Trellis initialization did not complete successfully")
+    if trellis_exit in {EXIT_TRELLIS_UNAVAILABLE, EXIT_TRELLIS_FAILED}:
+        exit_code = trellis_exit
+    elif args.dry_run or args.mode == "scaffold-only":
+        exit_code = 0
+    else:
+        assert readiness_exit_code is not None
+        exit_code = readiness_exit_code
+    files_written, files_skipped = _result_counts(results)
+    payload: dict[str, object] = {
+        "operation": args.mode,
+        "operation_status": "completed",
+        "root": _visible_root(root, args.redact_paths),
+        "readiness": readiness,
+        "readiness_exit_code": readiness_exit_code,
+        "exit_code": exit_code,
+        "files_written": files_written,
+        "files_skipped": files_skipped,
+        "results": [{"target": target, "status": status} for target, status in results],
+        "issues": issues,
+        "error_code": None,
+    }
+    if args.output == "json":
+        _emit_payload(args, payload)
+    else:
+        print(f"DXM scaffold root: {_visible_root(root, args.redact_paths)}")
+        print(f"DXM workflow mode: {args.mode}")
+        for filename, status in results:
+            print(f"- {status}: {filename}")
+        print_trellis_notes(trellis_output)
+        if args.dry_run:
+            print("DXM scaffold result: DRY_RUN")
+            print("DXM readiness: NOT_EVALUATED")
+        elif args.mode == "scaffold-only":
+            print("DXM scaffold result: SCAFFOLD_ONLY")
+            print("DXM readiness: NOT_EVALUATED")
+            print("Scaffold-only completed; no project readiness claim was made.")
+        else:
+            print(f"DXM scaffold status: {readiness}")
+            for issue in issues:
+                print(f"  - {issue}")
+            if readiness == READY:
+                print("Next: read AGENTS.md, then obey the generated project docs for all future work in this folder.")
+            else:
+                print("Next action: resolve the listed readiness gaps; DXM has not claimed READY.")
+
+    if trellis_exit == EXIT_TRELLIS_UNAVAILABLE:
+        if args.output != "json":
+            print("DXM_SCAFFOLDED_TRELLIS_UNAVAILABLE")
+        return exit_code
+    if trellis_exit == EXIT_TRELLIS_FAILED:
+        if args.output != "json":
+            print("DXM_SCAFFOLDED_TRELLIS_FAILED")
+        return exit_code
+    return exit_code
+
+
+def _run_recovery(args: argparse.Namespace, root: Path) -> int:
+    if not root.is_dir():
+        return _emit_failure(
+            args,
+            code=ERROR_RECOVERY_REQUIRED,
+            summary="recovery requires an existing project directory",
+            root=root,
+        )
+    try:
+        recovered = recover_transactions(root, break_stale_lock=args.break_stale_lock)
+    except DxmIoError as exc:
+        if args.debug and exc.cause is not None:
+            traceback.print_exception(exc.cause, file=sys.stderr)
+        return _emit_failure(args, code=exc.code, summary=exc.summary, root=root)
+    audit = audit_project(root, require_trellis=False)
+    payload = {
+        "operation": "recover",
+        "operation_status": "completed",
+        "root": _visible_root(root, args.redact_paths),
+        "recovered_transactions": recovered,
+        "readiness": audit.state,
+        "readiness_exit_code": audit.exit_code,
+        "exit_code": audit.exit_code,
+        "issues": list(audit.issues),
+        "error_code": None,
+    }
+    if args.output == "json":
+        _emit_payload(args, payload)
+    else:
+        print(f"DXM recovery root: {_visible_root(root, args.redact_paths)}")
+        print(f"DXM recovery transactions: {recovered}")
+        print(f"DXM readiness: {audit.state}")
+        for issue in audit.issues:
+            print(f"  - {issue}")
+    return audit.exit_code
+
+
+def _json_requested(arguments: list[str]) -> bool:
+    for index, argument in enumerate(arguments):
+        if argument == "--json" or argument == "--output=json":
+            return True
+        if argument == "--output" and index + 1 < len(arguments) and arguments[index + 1] == "json":
+            return True
+    return False
+
+
+def _argument_error_operation(arguments: list[str]) -> str:
+    if "--recover" in arguments:
+        return "recover"
+    for index, argument in enumerate(arguments):
+        value: str | None = None
+        if argument == "--mode" and index + 1 < len(arguments):
+            value = arguments[index + 1]
+        elif argument.startswith("--mode="):
+            value = argument.partition("=")[2]
+        if value in {"init", "scaffold-only"}:
+            return value
+    return "unknown"
+
+
+class DxmArgumentParser(argparse.ArgumentParser):
+    """Keep requested JSON output machine-readable even for parse failures."""
+
+    def __init__(self, *args: object, json_requested: bool = False, **kwargs: object) -> None:
+        self._json_requested = json_requested
+        super().__init__(*args, **kwargs)
+
+    def error(self, _message: str) -> None:
+        if self._json_requested:
+            payload = {
+                "operation": _argument_error_operation(sys.argv[1:]),
+                "operation_status": "failed",
+                "readiness": "NOT_EVALUATED",
+                "readiness_exit_code": None,
+                "exit_code": EXIT_INVALID,
+                "issues": ["invalid DXM CLI arguments"],
+                "error_code": "DXM_E_INVALID_ARGUMENTS",
+                "summary": "invalid DXM CLI arguments",
+            }
+            print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+            raise SystemExit(EXIT_INVALID)
+        super().error(_message)
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Scaffold DXM AI collaboration files")
+    parser = DxmArgumentParser(
+        description="DXM v2 scaffold and recovery CLI",
+        json_requested=_json_requested(sys.argv[1:]),
+    )
     parser.add_argument("--root", default=os.getcwd(), help="target project root; defaults to current directory")
     parser.add_argument(
         "--mode",
         choices=("init", "scaffold-only"),
-        help="lock the scaffold write mode; init requires --baseline, scaffold-only forbids it",
+        help="required DXM v2 write mode; init requires --baseline and scaffold-only forbids it",
     )
     parser.add_argument("--force", action="store_true", help="overwrite existing files; use only on explicit user request")
     parser.add_argument("--dry-run", action="store_true", help="report planned scaffold actions without writing files")
@@ -1029,41 +1450,65 @@ def main() -> int:
         type=Path,
         help="validated project baseline JSON to persist as .dxm/project.json and hydrate into the chain document",
     )
-    parser.add_argument("--inventory-depth", type=positive_int, default=1, help="maximum directory depth to include in the generated file inventory")
+    parser.add_argument(
+        "--inventory-depth",
+        type=bounded_positive_int(LIMITS["inventory_max_depth"]),
+        default=1,
+        help=f"maximum directory depth for the safe inventory (1-{LIMITS['inventory_max_depth']})",
+    )
     parser.add_argument("--self-test", action="store_true", help="run packaged DXM scaffold smoke checks and exit")
+    parser.add_argument("--recover", action="store_true", help="recover interrupted local DXM transactions; does not scaffold")
+    parser.add_argument("--break-stale-lock", action="store_true", help="allow --recover to clear a verified stale project lock")
     parser.add_argument("--allow-broad-root", action="store_true", help="allow scaffolding in a drive, home, system, vendor, or build root")
     parser.add_argument("--trellis", action="store_true", help="also initialize Trellis/Codex big-development workflow")
     parser.add_argument(
         "--trellis-user",
+        type=valid_trellis_user,
         default=os.environ.get("USERNAME") or os.environ.get("USER") or "developer",
-        help="developer name passed to trellis init when --trellis is used",
+        help="bounded developer name passed to trellis init when --trellis is used",
     )
     parser.add_argument(
         "--trellis-timeout-seconds",
-        type=int,
+        type=bounded_positive_int(LIMITS["trellis_timeout_max_seconds"]),
         default=120,
-        help="maximum seconds to wait for trellis init when --trellis is used",
+        help=f"maximum seconds to wait for Trellis init (1-{LIMITS['trellis_timeout_max_seconds']})",
     )
+    parser.add_argument("--output", choices=("text", "json"), default="text", help="result format")
+    parser.add_argument("--json", dest="output", action="store_const", const="json", help="alias for --output json")
+    parser.add_argument("--redact-paths", action="store_true", help="replace root paths in result output with $PROJECT_ROOT")
+    parser.add_argument("--debug", action="store_true", help="print a chained traceback for unexpected local failures")
     args = parser.parse_args()
 
     if args.self_test:
+        if args.mode is not None or args.recover:
+            return _emit_failure(args, code="DXM_E_INVALID_ARGUMENTS", summary="--self-test cannot be combined with write or recovery modes")
         try:
             run_self_test()
         except AssertionError as exc:
-            print(f"DXM self-test FAILED: {exc}", file=sys.stderr)
-            return 2
-        print("DXM self-test OK")
+            return _emit_failure(args, code="DXM_E_SELF_TEST_FAILED", summary=str(exc))
+        if args.output == "json":
+            _emit_payload(args, {"operation": "self-test", "operation_status": "completed", "error_code": None})
+        else:
+            print("DXM self-test OK")
         return 0
 
-    if args.mode == "init" and args.baseline is None:
-        print("Error: --mode init requires --baseline before any project write.", file=sys.stderr)
-        return EXIT_INVALID
-    if args.mode == "scaffold-only" and args.baseline is not None:
-        print("Error: --mode scaffold-only cannot accept --baseline or establish readiness.", file=sys.stderr)
-        return EXIT_INVALID
-
     root = Path(args.root).resolve()
+    if args.recover:
+        if args.mode is not None or args.baseline is not None or args.dry_run or args.trellis:
+            return _emit_failure(args, code="DXM_E_INVALID_ARGUMENTS", summary="--recover cannot be combined with scaffold options", root=root)
+        return _run_recovery(args, root)
+    if args.mode is None:
+        return _emit_failure(args, code="DXM_E_MODE_REQUIRED", summary="DXM v2 requires an explicit --mode", root=root)
+    if args.mode == "init" and args.baseline is None:
+        return _emit_failure(args, code="DXM_E_BASELINE_REQUIRED", summary="--mode init requires --baseline before any project write", root=root)
+    if args.mode == "scaffold-only" and args.baseline is not None:
+        return _emit_failure(args, code="DXM_E_INVALID_ARGUMENTS", summary="--mode scaffold-only cannot accept --baseline or establish readiness", root=root)
+
     baseline_data: dict[str, object] | None = None
+    refresh_existing_baseline = False
+    results: list[tuple[str, str]] = []
+    trellis_output = ""
+    trellis_exit = 0
     try:
         validate_project_root(root, args.allow_broad_root)
         if args.baseline is not None:
@@ -1072,70 +1517,121 @@ def main() -> int:
             if root.exists():
                 validate_managed_path(root, existing_baseline)
             if existing_baseline.exists():
-                # Validate readability before scaffold creates or refreshes any
-                # project documents, preserving the preflight transaction boundary.
                 read_existing_text(existing_baseline)
+        elif args.refresh_blocks:
+            existing_baseline = root / ".dxm" / "project.json"
+            if existing_baseline.exists():
+                baseline_data = load_baseline(
+                    existing_baseline,
+                    expected_root=root,
+                    require_trusted_path=True,
+                )
+                refresh_existing_baseline = True
         if args.trellis:
             validate_trellis_update_inputs(root)
-        results = scaffold(
-            root,
-            args.force,
-            args.dry_run,
-            args.refresh_blocks,
-            args.trellis,
-            args.inventory_depth,
-            baseline=baseline_data is not None,
-        )
-        if baseline_data is not None:
-            results.extend(persist_project_baseline(root, baseline_data, dry_run=args.dry_run))
-    except (ExistingFileEncodingError, BrokenManagedBlockError, InvalidManagedBlockError, UnsafeManagedPathError) as exc:
-        print_safe_update_error(exc)
-        return EXIT_INVALID
-    except ContractError as exc:
-        print(f"Error: invalid DXM baseline: {'; '.join(exc.errors)}", file=sys.stderr)
-        return EXIT_INVALID
-    except UnsafeProjectRootError as exc:
-        print(f"Error: {exc.root} is too broad for DXM scaffold; choose a project root or pass --allow-broad-root explicitly.", file=sys.stderr)
-        return EXIT_INVALID
-    except ProjectRootNotDirectoryError as exc:
-        detail = "" if exc.blocker == exc.root else f" Existing ancestor {exc.blocker} is not a directory."
-        print(f"Error: {exc.root} project root must be a directory.{detail}", file=sys.stderr)
-        return EXIT_INVALID
+        if root.exists():
+            validate_managed_path(root, root / ".dxm" / "locks" / "project.lock")
+            validate_managed_path(root, root / ".dxm" / "transactions" / "preflight.json")
+        if pending_transaction_states(root):
+            raise DxmIoError(ERROR_RECOVERY_REQUIRED, "an interrupted DXM transaction requires --recover before a new write")
 
-    trellis_output = ""
-    trellis_exit = 0
-    if args.trellis:
         if args.dry_run:
-            status, trellis_output = ("would-run", "")
-        elif (root / ".trellis").is_dir():
-            status, trellis_output = ("already-present", "")
+            results = scaffold(
+                root,
+                args.force,
+                True,
+                args.refresh_blocks,
+                args.trellis,
+                args.inventory_depth,
+                baseline=baseline_data is not None,
+            )
+            if baseline_data is not None:
+                if refresh_existing_baseline:
+                    results.extend(refresh_project_baseline_block(root, baseline_data, dry_run=True))
+                else:
+                    results.extend(persist_project_baseline(root, baseline_data, dry_run=True))
         else:
-            status, trellis_output = run_trellis_init(root, args.trellis_user, args.trellis_timeout_seconds)
-        if status == "missing-command":
-            trellis_exit = EXIT_TRELLIS_UNAVAILABLE
-        elif status in {"timeout", "incomplete-no-trellis-dir"} or status.startswith(("failed-exit-", "failed-launch-")):
-            trellis_exit = EXIT_TRELLIS_FAILED
-        results.append(("trellis init --codex", status))
-        if args.dry_run and (root / ".trellis").exists():
-            try:
+            global _ACTIVE_TRANSACTION
+            with ProjectLock(root, args.mode):
+                if pending_transaction_states(root):
+                    raise DxmIoError(ERROR_RECOVERY_REQUIRED, "an interrupted DXM transaction requires --recover before a new write")
+                transaction = ProjectTransaction(root, args.mode)
+                _ACTIVE_TRANSACTION = transaction
+                try:
+                    results = scaffold(
+                        root,
+                        args.force,
+                        False,
+                        args.refresh_blocks,
+                        args.trellis,
+                        args.inventory_depth,
+                        baseline=baseline_data is not None,
+                    )
+                    if baseline_data is not None:
+                        if refresh_existing_baseline:
+                            results.extend(refresh_project_baseline_block(root, baseline_data, dry_run=False))
+                        else:
+                            results.extend(persist_project_baseline(root, baseline_data, dry_run=False))
+
+                    if args.trellis:
+                        if (root / ".trellis").is_dir():
+                            status, trellis_output = ("already-present", "")
+                        else:
+                            status, trellis_output = run_trellis_init(root, args.trellis_user, args.trellis_timeout_seconds)
+                        if status == "missing-command":
+                            trellis_exit = EXIT_TRELLIS_UNAVAILABLE
+                        elif status in {"timeout", "incomplete-no-trellis-dir"} or status.startswith(("failed-exit-", "failed-launch-")):
+                            trellis_exit = EXIT_TRELLIS_FAILED
+                        results.append(("trellis init --codex", status))
+                        if (root / ".trellis").exists():
+                            validate_trellis_update_inputs(root)
+                            results.extend(ensure_trellis_docs(root, refresh_blocks=args.refresh_blocks))
+                            results.extend(ensure_trellis_safety_overrides(root, refresh_blocks=args.refresh_blocks))
+                    transaction.commit()
+                except BaseException:
+                    try:
+                        transaction.rollback()
+                    finally:
+                        _ACTIVE_TRANSACTION = None
+                    raise
+                _ACTIVE_TRANSACTION = None
+
+        if args.dry_run and args.trellis:
+            status, trellis_output = ("would-run", "")
+            results.append(("trellis init --codex", status))
+            if (root / ".trellis").exists():
                 results.extend(ensure_trellis_docs(root, dry_run=True, refresh_blocks=args.refresh_blocks))
                 results.extend(ensure_trellis_safety_overrides(root, dry_run=True, refresh_blocks=args.refresh_blocks))
-            except (ExistingFileEncodingError, BrokenManagedBlockError, InvalidManagedBlockError, UnsafeManagedPathError) as exc:
-                print_safe_update_error(exc)
-                return EXIT_INVALID
-        elif args.dry_run:
-            results.extend(planned_trellis_post_init_actions())
-        if not args.dry_run and (root / ".trellis").exists():
-            try:
-                validate_trellis_update_inputs(root)
-                results.extend(ensure_trellis_docs(root, refresh_blocks=args.refresh_blocks))
-                results.extend(ensure_trellis_safety_overrides(root, refresh_blocks=args.refresh_blocks))
-            except (ExistingFileEncodingError, BrokenManagedBlockError, InvalidManagedBlockError, UnsafeManagedPathError) as exc:
-                print_safe_update_error(exc)
-                return EXIT_INVALID
+            else:
+                results.extend(planned_trellis_post_init_actions())
+    except (
+        ExistingFileEncodingError,
+        BrokenManagedBlockError,
+        InvalidManagedBlockError,
+        UnsafeManagedPathError,
+        TrellisConfigError,
+    ) as exc:
+        return _emit_failure(args, code="DXM_E_UNSAFE_UPDATE", summary=str(exc), root=root)
+    except GitPrivacyError as exc:
+        return _emit_failure(args, code="DXM_E_GITIGNORE_INVALID", summary=str(exc), root=root)
+    except ContractError as exc:
+        return _emit_failure(args, code="DXM_E_INVALID_BASELINE", summary="invalid DXM baseline: " + "; ".join(exc.errors), root=root)
+    except UnsafeProjectRootError as exc:
+        return _emit_failure(args, code="DXM_E_UNSAFE_ROOT", summary=f"{exc.root} is too broad for DXM scaffold; choose a project root or pass --allow-broad-root explicitly", root=root)
+    except ProjectRootNotDirectoryError as exc:
+        detail = "" if exc.blocker == exc.root else f" Existing ancestor {exc.blocker} is not a directory."
+        return _emit_failure(args, code="DXM_E_ROOT_NOT_DIRECTORY", summary=f"{exc.root} project root must be a directory.{detail}", root=root)
+    except DxmIoError as exc:
+        if args.debug and exc.cause is not None:
+            traceback.print_exception(exc.cause, file=sys.stderr)
+        return _emit_failure(args, code=exc.code, summary=exc.summary, root=root)
+    except OSError as exc:
+        if args.debug:
+            traceback.print_exception(exc, file=sys.stderr)
+        return _emit_failure(args, code=ERROR_WRITE_FAILED, summary="an unexpected local filesystem operation failed", root=root)
 
     audit = None
-    if not args.dry_run:
+    if not args.dry_run and (args.mode == "init" or args.trellis):
         base_audit = audit_project(root, require_trellis=False)
         audit = audit_project(root, require_trellis=args.trellis)
         if args.trellis and trellis_exit == 0:
@@ -1144,41 +1640,7 @@ def main() -> int:
             if trellis_only_issues:
                 trellis_exit = EXIT_TRELLIS_FAILED
                 results.append(("trellis integration audit", "incomplete"))
-
-    print(f"DXM scaffold root: {root}")
-    print(f"DXM workflow mode: {args.mode or 'legacy-compatible'}")
-    for filename, status in results:
-        print(f"- {status}: {filename}")
-    print_trellis_notes(trellis_output)
-    if args.dry_run:
-        print("DXM scaffold result: DRY_RUN")
-        print("DXM readiness: NOT_EVALUATED")
-    elif args.mode == "scaffold-only":
-        print("DXM scaffold result: SCAFFOLD_ONLY")
-        print("DXM readiness: NOT_EVALUATED")
-    else:
-        assert audit is not None
-        display_state = PARTIAL if trellis_exit and audit.state == READY else audit.state
-        print(f"DXM scaffold status: {display_state}")
-        for issue in audit.issues:
-            print(f"  - {issue}")
-        if trellis_exit and display_state == PARTIAL and not audit.issues:
-            print("  - explicit Trellis initialization did not complete successfully")
-
-    if trellis_exit == EXIT_TRELLIS_UNAVAILABLE:
-        print("DXM_SCAFFOLDED_TRELLIS_UNAVAILABLE")
-        return trellis_exit
-    if trellis_exit == EXIT_TRELLIS_FAILED:
-        print("DXM_SCAFFOLDED_TRELLIS_FAILED")
-        return trellis_exit
-
-    if not args.dry_run and args.mode != "scaffold-only" and audit.state == READY:
-        print("Next: read AGENTS.md, then obey the generated project docs for all future work in this folder.")
-    elif not args.dry_run and args.mode != "scaffold-only" and audit.state in {PARTIAL, BROKEN}:
-        print("Next action: resolve the listed readiness gaps; DXM has not claimed READY.")
-    elif not args.dry_run and args.mode == "scaffold-only":
-        print("Scaffold-only completed; no project readiness claim was made.")
-    return 0
+    return _emit_scaffold_result(args, root, results, audit, trellis_exit, trellis_output)
 
 
 if __name__ == "__main__":

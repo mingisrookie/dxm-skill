@@ -18,6 +18,8 @@ SKILL_MD = SKILL_DIR / "SKILL.md"
 TEMPLATE_DIR = SKILL_DIR / "assets" / "templates"
 AGENTS_TEMPLATE = TEMPLATE_DIR / "AGENTS.md.template"
 SCRIPT_PATH = SKILL_DIR / "scripts" / "scaffold_dxm.py"
+ROUTER_PATH = SKILL_DIR / "scripts" / "dxm.py"
+POLICY_PATH = SKILL_DIR / "contract" / "policy.json"
 CHAIN_DOC = REPO_ROOT / "项目完整链路说明.md"
 OPENAI_METADATA = SKILL_DIR / "agents" / "openai.yaml"
 README = REPO_ROOT / "README.md"
@@ -127,6 +129,17 @@ class DocSyncTest(unittest.TestCase):
         self.assertNotIn("validate_dxm.py audit", ci_commands)
         self.assertIn("本地发布前", ci_section)
 
+    def test_ci_has_pinned_cross_platform_v2_coverage(self) -> None:
+        ci_text = CI_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("permissions:\n  contents: read", ci_text)
+        for runner in ("ubuntu-latest", "windows-latest", "macos-latest"):
+            self.assertIn(f"- {runner}", ci_text)
+        for version in ('"3.10"', '"3.12"', '"3.14"'):
+            self.assertIn(f"- {version}", ci_text)
+        self.assertIn("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", ci_text)
+        self.assertIn("actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97", ci_text)
+        self.assertNotRegex(ci_text, r"actions/(?:checkout|setup-python)@v\\d+")
+
     def test_force_flag_warning_matches_actual_overwrite_scope(self) -> None:
         self.assertIn("Overwrite existing DXM target files", self.skill_text)
         self.assertNotIn("Overwrite generated files", self.skill_text)
@@ -134,9 +147,12 @@ class DocSyncTest(unittest.TestCase):
     def test_dogfood_chain_doc_describes_real_repo_pipeline(self) -> None:
         for expected in [
             "skills/dxm/SKILL.md",
+            "skills/dxm/scripts/dxm.py",
             "skills/dxm/scripts/scaffold_dxm.py",
+            "skills/dxm/contract/policy.json",
             "skills/dxm/assets/templates/",
             "tests/test_scaffold_dxm.py",
+            "tests/test_dxm_v2.py",
             "tests/test_doc_sync.py",
             "python -m unittest discover -s tests -v",
         ]:
@@ -245,10 +261,21 @@ class DocSyncTest(unittest.TestCase):
             "| `ABSENT` | `4` |",
             'Copy-Item -Recurse -LiteralPath "skills/dxm" -Destination $core',
             'python "$core/scripts/scaffold_dxm.py" --self-test',
+            'python "$core/scripts/dxm.py" --version',
             'python "$core/scripts/validate_dxm.py" --version',
+            "DXM_E_MODE_REQUIRED",
+            "DXM_E_RECOVERY_REQUIRED",
+            "dxm.py status --root /path/to/project",
             "receipt-schema=2",
         ):
             self.assertIn(expected, self.readme_text)
+
+    def test_v2_core_policy_and_router_remain_packaged(self) -> None:
+        self.assertTrue(ROUTER_PATH.is_file(), "DXM v2 router is missing from the core package")
+        policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(policy.get("schema_version"), 1)
+        self.assertEqual(set(policy.get("profiles", {})), {"lite", "standard", "high-assurance"})
+        self.assertIn("inventory_max_depth", policy.get("limits", {}))
 
     def test_shared_project_docs_use_portable_root_projection(self) -> None:
         template_dir = REPO_ROOT / "skills" / "dxm" / "assets" / "templates"
@@ -278,6 +305,14 @@ class DocSyncTest(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(self_test.returncode, 0, self_test.stdout + self_test.stderr)
+
+            router_version = subprocess.run(
+                [sys.executable, str(installed_core / "scripts" / "dxm.py"), "--version"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(router_version.returncode, 0, router_version.stdout + router_version.stderr)
 
             empty_project = temp_root / "project"
             empty_project.mkdir()

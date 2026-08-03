@@ -468,7 +468,7 @@ class BaselineContractTests(unittest.TestCase):
             with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 data = valid_baseline(root)
-                data["deployment"] = deployment
+                data["extensions"] = {"example.test/deployment": deployment}
 
                 errors = contract.validate_baseline(data, expected_root=root)
 
@@ -485,7 +485,7 @@ class BaselineContractTests(unittest.TestCase):
             data["goal"] = "Document Authorization: Bearer <token>."
             data["runtime"]["facts"] = ["Read api_key=${DXM_API_KEY}; never persist it."]
             data["validation_commands"] = ["echo sk-example-placeholder"]
-            data["deployment"] = {
+            data["extensions"] = {"example.test/deployment": {
                 "api_key": "${DXM_API_KEY}",
                 "access_token": "env:DXM_ACCESS_TOKEN",
                 "password": "<redacted>",
@@ -504,7 +504,7 @@ class BaselineContractTests(unittest.TestCase):
                     "reasoningTokens": 100,
                     "usedTokens": 1500,
                 },
-            }
+            }}
 
             self.assertEqual(contract.validate_baseline(data, expected_root=root), [])
 
@@ -1357,6 +1357,59 @@ class ReceiptContractTests(unittest.TestCase):
             write_receipt_project(root, contract)
             self.assertEqual(contract.validate_receipt(valid_receipt(root), expected_root=root), [])
 
+    def test_receipt_rejects_unknown_fields_outside_extensions(self) -> None:
+        contract = load_contract()
+
+        def add_unknown_observation(receipt: dict) -> None:
+            observation = valid_observation()
+            observation["unknown"] = True
+            receipt["evidence"]["AC-01"]["cli"] = [observation]
+
+        cases = {
+            "receipt": lambda receipt: receipt.__setitem__("unexpected_top_level", True),
+            "requirement": lambda receipt: receipt["requirements"][0].__setitem__("unknown", True),
+            "adversarial_check": lambda receipt: receipt["adversarial_check"].__setitem__("unknown", True),
+            "quality_checks": lambda receipt: receipt["quality_checks"].__setitem__("unknown", True),
+            "observation": add_unknown_observation,
+        }
+        for label, mutate in cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                write_receipt_project(root, contract)
+                receipt = valid_receipt(root)
+                mutate(receipt)
+
+                errors = contract.validate_receipt(receipt, expected_root=root)
+
+                self.assertIn("unsupported fields", " ".join(errors))
+
+    def test_receipt_rejects_a_pending_transaction_even_when_docs_are_ready(self) -> None:
+        contract = load_contract()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_receipt_project(root, contract)
+            journal = root / ".dxm" / "transactions" / f"{'a' * 32}.json"
+            journal.parent.mkdir(parents=True)
+            journal.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "operation_id": "a" * 32,
+                        "root": str(root.resolve()),
+                        "mode": "init",
+                        "state": "prepared",
+                        "entries": [],
+                    }
+                ),
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            errors = contract.validate_receipt(valid_receipt(root), expected_root=root)
+
+            self.assertIn("must be READY", " ".join(errors))
+            self.assertIn("PARTIAL", " ".join(errors))
+
     def test_receipt_rejects_non_completion_workflow_modes(self) -> None:
         contract = load_contract()
         with tempfile.TemporaryDirectory() as tmp:
@@ -1460,7 +1513,7 @@ class ReceiptContractTests(unittest.TestCase):
                 root = Path(tmp)
                 write_receipt_project(root, contract)
                 receipt = valid_receipt(root)
-                receipt["metadata"] = metadata
+                receipt["extensions"] = {"example.test/metadata": metadata}
 
                 errors = contract.validate_receipt(receipt, expected_root=root)
 
@@ -1477,24 +1530,26 @@ class ReceiptContractTests(unittest.TestCase):
             receipt = valid_receipt(root)
             receipt["evidence"]["AC-01"]["unit-test"][0] = "Bearer <redacted>"
             receipt["adversarial_check"]["summary"] = "Checked api_key=${DXM_API_KEY}."
-            receipt["metadata"] = {
-                "api_key": "${DXM_API_KEY}",
-                "access_token": "env:DXM_ACCESS_TOKEN",
-                "password": "<redacted>",
-                "client_secret": "<env:DXM_CLIENT_SECRET>",
-                "api_key=<env:DXM_SECONDARY_KEY>": "ignored",
-                "credentialsPayload": {"value": "ignored"},
-                "public_key": "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456",
-                "model_limits": {"maxTokens": 128000, "maxOutputTokens": 8192},
-                "usage": {
-                    "inputTokens": 1200,
-                    "outputTokens": 300,
-                    "totalTokens": 1500,
-                    "promptTokens": 1200,
-                    "completionTokens": 300,
-                    "cachedTokens": 600,
-                    "reasoningTokens": 100,
-                    "usedTokens": 1500,
+            receipt["extensions"] = {
+                "example.test/metadata": {
+                    "api_key": "${DXM_API_KEY}",
+                    "access_token": "env:DXM_ACCESS_TOKEN",
+                    "password": "<redacted>",
+                    "client_secret": "<env:DXM_CLIENT_SECRET>",
+                    "api_key=<env:DXM_SECONDARY_KEY>": "ignored",
+                    "credentialsPayload": {"value": "ignored"},
+                    "public_key": "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456",
+                    "model_limits": {"maxTokens": 128000, "maxOutputTokens": 8192},
+                    "usage": {
+                        "inputTokens": 1200,
+                        "outputTokens": 300,
+                        "totalTokens": 1500,
+                        "promptTokens": 1200,
+                        "completionTokens": 300,
+                        "cachedTokens": 600,
+                        "reasoningTokens": 100,
+                        "usedTokens": 1500,
+                    },
                 },
             }
 

@@ -17,7 +17,7 @@ Root or scope disagreement is an integrity problem, not permission to silently f
 
 A continue-development request on a `PARTIAL` workspace routes to `task` by default: keep the existing baseline artifacts and list readiness gaps as pending work. `init` applies to a `PARTIAL` workspace only when the gap is the project baseline itself and the user agrees to establish it.
 
-The write boundary is executable: `init` calls `scaffold_dxm.py --mode init --root <root> --baseline <baseline.json>` and fails before writing when the baseline is absent; explicit template-only work calls `--mode scaffold-only --root <root>` and reports `readiness: NOT_EVALUATED`. A legacy call without `--mode` remains compatible but is not proof of an init gate.
+The write boundary is executable: `init` calls `dxm.py init --root <root> --baseline <baseline.json>` or `scaffold_dxm.py --mode init --root <root> --baseline <baseline.json>` and fails before writing when the baseline is absent; explicit template-only work calls `dxm.py scaffold-only --root <root>` or `scaffold_dxm.py --mode scaffold-only --root <root>` and reports `readiness: NOT_EVALUATED`. DXM v2 rejects a no-`--mode` write call. Explicit init returns the actual audit code: `READY=0`, `BROKEN=2`, `PARTIAL=3`, `ABSENT=4`; write JSON includes operation/readiness, actual `exit_code`, `issues`, applicable `error_code`, and separate `readiness_exit_code` for CI and orchestration. When `--output json` is requested, argument-boundary failures use the same shape with `DXM_E_INVALID_ARGUMENTS` rather than argparse prose.
 
 ## Bounded clarification
 
@@ -41,6 +41,10 @@ Scaffold success and project readiness are different claims:
 - `BROKEN`: encoding, JSON, marker, root, or integrity checks fail.
 
 Only a read-only audit decides readiness. Real Markdown managed markers are valid only as zero pairs or one ordered START/END pair; complete fenced/inline marker examples are ignored, while an unclosed fence cannot hide integrity-significant content.
+
+DXM writes use a root-local lock, same-directory atomic replacement, a journal, rollback, and an explicit recovery command. Audit, doctor, and receipt validation all classify active/stale/malformed locks plus pending/unsafe journals as non-ready; recovery validates local-state topology, operation ID, filename, entry schema and backup layout before mutation. A pending journal or stale lock is a stop condition, not a reason to try another scaffold. `--refresh-blocks` rehydrates an existing valid baseline block from `.dxm/project.json` without rewriting the JSON. In a Git worktree, the managed `.gitignore` block ignores `.dxm/`; a tracked local-state file is BROKEN and DXM never performs `git rm --cached` without a human decision. Initial file inventory is bounded streaming data-only JSON, not Markdown prose from untrusted filenames.
+
+baseline `profile` is `standard` by default and may be `lite` or `high-assurance`. Core schema objects reject unknown fields; product-specific additions belong in namespaced `extensions`. Portable project-relative paths reject Windows device aliases, trailing dot/space segments, control characters, and non-NFC forms.
 
 ## Trellis relationship
 
@@ -80,7 +84,7 @@ Every runtime-sensitive evidence kind contains a **structured observation** with
 
 Before claiming `init` or `task` completion, validate a `schema_version: 2` machine-readable completion receipt. It binds the canonical run through `run_id` + `run_sha256`, requires `requirements[].id/status/evidence_kinds` to exactly cover run outcomes, and copies `baseline_impact` plus `unverified_boundaries`. It also records per-ID/per-kind `evidence`, `adversarial_check`, `quality_checks.docs/encoding/secrets/rollback`, `trellis.required/task/check_passed/finished`, and Git facts without authorizing Git. Default validation rejects v1; explicit `--legacy-v1` is historical audit-only.
 
-For Trellis, first pass the adversarial check and use exactly one `<!-- DXM-CHECK:PASS -->` fragment as the first non-empty, column-zero standalone line in canonical `check.md`; then `finish`, `task.py archive <task> --no-commit`, and validate `.trellis/tasks/archive/<YYYY-MM>/<task>/completion.json`. A run-only task validates `.dxm/runs/<run_id>/completion.json`. High-risk release/deploy/live-data/multi-module architecture runs require `independent_review_required: true` and a fresh `independent_review` PASS by a different Agent; the receipt binds the canonical task/run `independent-review.md` with `artifact_sha256`, and its top-level `reviewer_id`, timezone-aware `reviewed_at`, and `verdict: PASS` must match. Normal small runs do not. Missing/failed/stale observations, run or impact drift, bad paths/hashes, a non-passing check, credentials, or false state fail closed.
+For Trellis, first pass the adversarial check and use exactly one `<!-- DXM-CHECK:PASS -->` fragment as the first non-empty, column-zero standalone line in canonical `check.md`; then `finish`, `task.py archive <task> --no-commit`, and validate `.trellis/tasks/archive/<YYYY-MM>/<task>/completion.json`. A run-only task validates `.dxm/runs/<run_id>/completion.json`. High-risk release/deploy/live-data/multi-module architecture runs require `independent_review_required: true` and a fresh `independent_review` PASS by a different Agent; the receipt binds the canonical task/run `independent-review.md` with `artifact_sha256`, and its top-level `reviewer_id`, timezone-aware `reviewed_at`, and `verdict: PASS` must match. That local review only proves self-consistency and reviewer separation, not a trusted identity. `high-assurance` additionally requires structured, externally verifiable `external_provenance` verified in an independent trusted boundary. Normal small runs do not. Missing/failed/stale observations, run or impact drift, bad paths/hashes, a non-passing check, credentials, or false state fail closed.
 
 ## Evidence priority
 
@@ -99,4 +103,4 @@ Keep actual entry points, module boundaries, validation commands, Git policy, ru
 
 ## Release discipline
 
-A release is complete only when the requested code, version metadata, `CHANGELOG.md`, tag, GitHub Release, Latest status, release notes, compare link, and live verification agree. Pushing a branch alone does not prove release completion.
+A release is complete only when the requested code, version metadata, `CHANGELOG.md`, tag, GitHub Release, Latest status, release notes, compare link, and live verification agree. When a release has a downloadable artifact, publish its SHA-256 manifest and re-download the public artifact for a hash comparison. Pushing a branch alone does not prove release completion.

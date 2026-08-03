@@ -66,7 +66,11 @@
 
 `new-project-grill`、`lightweight-grill` 是标签，`grill-with-docs` 是可选 router，legacy `grill-me` 只是可选别名；核心 DXM 必须能以内联问答完成。`domain-modeling` 只在稳定术语、上下文边界、context map 或 ADR 决策实际新增/变化时写入，普通查证不创建域文档。
 
-写入门必须进入 CLI：`init` 运行 `scaffold_dxm.py --mode init --root <root> --baseline <baseline.json>`；明确模板专用才运行 `--mode scaffold-only --root <root>`。前者缺 baseline 必须零写入失败；后者输出 `readiness: NOT_EVALUATED`，不能冒充 READY。无 `--mode` 调用只保留旧兼容语义。
+写入门必须进入 CLI：`init` 运行 `scaffold_dxm.py --mode init --root <root> --baseline <baseline.json>`；明确模板专用才运行 `--mode scaffold-only --root <root>`。前者缺 baseline 必须零写入失败；后者输出 `readiness: NOT_EVALUATED`，不能冒充 READY。DXM v2 无 `--mode` 调用一律以 `DXM_E_MODE_REQUIRED` 失败；显式 `init` 必须返回最终 audit exit code（`READY=0`、`BROKEN=2`、`PARTIAL=3`、`ABSENT=4`），CI/Agent 应使用 `--output json` 区分 operation completion 与 readiness；已请求 JSON 的参数边界错误同样返回稳定结构和 `DXM_E_INVALID_ARGUMENTS`。
+
+脚手架写入必须使用项目锁、原子替换、事务 journal 和显式 `--recover`。发现未完成 transaction/stale lock 时先恢复而不是继续写入；普通 I/O 故障以稳定 `DXM_E_*` 结果返回，默认不泄露 traceback。Git 项目必须维护 `.gitignore` 中的 DXM 托管块以忽略 `.dxm/`；已跟踪的 `.dxm` 状态是 BROKEN，禁止自动执行 `git rm --cached`。初始化快照仅以受限 JSON 记录文件名并限制深度、条目、字节、耗时，工具私有目录默认不展开。
+
+baseline 的 `profile` 可为 `lite`、`standard`（默认）或 `high-assurance`。local independent review 只验证 reviewer 字段分离和本地证据自洽；high-assurance 必须在独立可信边界验证外部 provenance，并在 receipt 中记录 `external_provenance`，本地哈希不能替代身份或签名证明。
 
 ### 0.4 Trellis 使用边界
 
@@ -187,7 +191,7 @@ Trellis 是中大型任务记忆层，不替代 DXM。
 
 交付层级必须从用户任务推导：`修复/启用/生效/正常运行` 等行为目标要求运行态证据；明确 **source-only** 的任务可以只交源码，但必须记录 `unverified_boundaries`，且不得宣称已生效、已部署或线上已修复。拿不到原始目标所需证据时报告 partial/blocked，不得静默缩小目标。
 
-运行态 evidence kind 至少记录一个 **structured observation**：`observed_at`、`subject`、`method`、`result`、`summary`；项目内 artifact 可带 `path` + `sha256`。isolated 证据必须额外写 `final_artifact: true` 和 `decisive_branch`，单纯进程/窗口启动不算 E2E。release/deploy/live-data/multi-module architecture 等高风险任务必须设置 `independent_review_required: true`，并由不同 Agent 产出新鲜 `independent_review` PASS；回执还必须用 `artifact_sha256` 绑定 task/run 目录的 canonical `independent-review.md`，文件顶层 `reviewer_id`、带时区 `reviewed_at`、`verdict: PASS` 与回执一致。普通小修不强制。
+运行态 evidence kind 至少记录一个 **structured observation**：`observed_at`、`subject`、`method`、`result`、`summary`；项目内 artifact 可带 `path` + `sha256`。isolated 证据必须额外写 `final_artifact: true` 和 `decisive_branch`，单纯进程/窗口启动不算 E2E。release/deploy/live-data/multi-module architecture 等高风险任务必须设置 `independent_review_required: true`，并由不同 Agent 产出新鲜 `independent_review` PASS；回执还必须用 `artifact_sha256` 绑定 task/run 目录的 canonical `independent-review.md`，文件顶层 `reviewer_id`、带时区 `reviewed_at`、`verdict: PASS` 与回执一致。该 gate 不声称可信身份；`high-assurance` 另需外部 provenance。普通小修不强制。
 
 ## 4. 文档更新规范
 

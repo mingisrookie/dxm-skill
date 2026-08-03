@@ -39,7 +39,9 @@
 
 > 上方快照为自动生成的顶层种子，只能作为起点；维护者应继续补充关键子目录、入口文件和运行态目录的职责。
 
-DXM 本地状态约定：`.dxm/project.json` 保存项目 baseline；`.dxm/runs/<run_id>/run.json` 保存每个可写任务的原始目标、scope、outcomes、`baseline_impact`、risk 和证据层级，run-only `completion.json` 与适用时的 canonical `independent-review.md` 位于同目录。Trellis high-risk review 则位于对应 task 目录的 `independent-review.md`。这些本地状态应由 Git 忽略，不作为源码或发布产物。
+DXM 本地状态约定：`.dxm/project.json` 保存项目 baseline；`.dxm/runs/<run_id>/run.json` 保存每个可写任务的原始目标、scope、outcomes、`baseline_impact`、risk 和证据层级，run-only `completion.json` 与适用时的 canonical `independent-review.md` 位于同目录。Trellis high-risk review 则位于对应 task 目录的 `independent-review.md`。Git 项目由 `.gitignore` 的 `# DXM:START` / `# DXM:END` 托管块忽略 `.dxm/`；已跟踪状态必须人工解除跟踪，DXM 不会自动改写 Git index。
+
+`.dxm/locks/` 和 `.dxm/transactions/` 是本地可恢复写入基础设施，默认不作为源码或发布产物。当前根目录快照使用受限 JSON 编码，默认不展开 `.dxm`、`.trellis`、`.agents`、`.codex` 等工具状态目录，并受深度、条目、字节和耗时上限约束。
 
 ## 文件维护边界
 

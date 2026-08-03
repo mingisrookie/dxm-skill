@@ -27,7 +27,7 @@
 
 1. `skills/dxm/SKILL.md` 与 `references/dxm-method.md`：触发、状态机、问题预算和完成门。
 2. `skills/dxm/assets/templates/`：生成到用户项目的自包含长期规则。
-3. `skills/dxm/scripts/scaffold_dxm.py`、`dxm_contract.py`、`validate_dxm.py`：写入、基线、readiness 和 receipt 的真实行为。
+3. `skills/dxm/scripts/dxm.py`、`scaffold_dxm.py`、`dxm_io.py`、`dxm_git.py`、`dxm_inventory.py`、`dxm_policy.py`、`dxm_contract.py`、`validate_dxm.py`：命令面、可恢复写入、隐私/库存/策略、基线、readiness 和 receipt 的真实行为。
 4. `skills/dxm/agents/openai.yaml`、`README.md`、`tests/`：运行时元数据、公开用法和行为级防漂移契约。
 
 至少运行与影响面对应的定向测试；最终收口运行：
@@ -38,7 +38,7 @@ python skills/dxm/scripts/scaffold_dxm.py --self-test
 python skills/dxm/scripts/validate_dxm.py audit --root . --require-trellis
 ```
 
-核心包必须在只复制 `skills/dxm`、没有 sibling skills 的隔离目录中仍可执行 self-test 和 validator。Trellis 任务按“对抗检查 → `finish` → `task.py archive <task> --no-commit` → 在归档目录生成/校验 completion receipt → 人类回执”收口；不得在归档前预写 `finished: true`，也不得省略 `--no-commit` 绕过 Git 授权。
+核心包必须在只复制 `skills/dxm`、没有 sibling skills 的隔离目录中仍可执行 self-test、`dxm.py` 与 validator。Trellis 任务按“对抗检查 → `finish` → `task.py archive <task> --no-commit` → 在归档目录生成/校验 completion receipt → 人类回执”收口；不得在归档前预写 `finished: true`，也不得省略 `--no-commit` 绕过 Git 授权。
 
 
 ## 0. AI 协作执行协议
@@ -88,7 +88,9 @@ python skills/dxm/scripts/validate_dxm.py audit --root . --require-trellis
 
 `new-project-grill`、`lightweight-grill` 是标签，`grill-with-docs` 是可选 router，legacy `grill-me` 只是可选别名；核心 DXM 必须能以内联问答完成。`domain-modeling` 只在稳定术语、上下文边界、context map 或 ADR 决策实际新增/变化时写入，普通查证不创建域文档。
 
-写入门必须进入 CLI：`init` 运行 `scaffold_dxm.py --mode init --root <root> --baseline <baseline.json>`；明确模板专用才运行 `--mode scaffold-only --root <root>`。前者缺 baseline 必须零写入失败；后者输出 `readiness: NOT_EVALUATED`，不能冒充 READY。无 `--mode` 调用只保留旧兼容语义。
+写入门必须进入 CLI：`init` 运行 `scaffold_dxm.py --mode init --root <root> --baseline <baseline.json>`；明确模板专用才运行 `--mode scaffold-only --root <root>`。前者缺 baseline 必须零写入失败，且最终进程退出码必须映射到审计 readiness；后者输出 `readiness: NOT_EVALUATED`，不能冒充 READY。v2 无 `--mode` 调用必须以 `DXM_E_MODE_REQUIRED` 失败，不能保留会把 PARTIAL/BROKEN 伪装为成功的兼容语义。
+
+写入实现必须先取得项目锁、以同目录原子替换更新受管文件、在 journal 中保留可恢复的旧/新摘要；检测到未完成事务或 stale lock 时停止写入并要求显式 `--recover`。Git worktree 必须有可移植的 `.dxm/` ignore 托管块；已被 Git 跟踪的本地状态为 BROKEN，只能人工解除跟踪，DXM 不得自动改 index。目录快照、schema 键和配置文件名都按不可信输入处理，受 policy 限制并拒绝把名字解释为 Markdown/指令。
 
 ### 0.4 Trellis 使用边界
 
@@ -105,7 +107,7 @@ Trellis 是中大型任务记忆层，不替代 DXM。
 
 ### 0.5 发布 / Release 完成面
 
-当任务涉及发布、版本、latest、安装包、公开仓库或 release notes 时，必须把发布视为多表面交付：代码提交、版本号、`CHANGELOG.md`、tag、GitHub Release、Latest 状态、中文更新日志、对比链接和验证证据要一起完成。只 push main 不算发布完成。
+当任务涉及发布、版本、latest、安装包、公开仓库或 release notes 时，必须把发布视为多表面交付：代码提交、版本号、`CHANGELOG.md`、tag、GitHub Release、Latest 状态、中文更新日志、对比链接、发布 asset manifest、公开再下载 hash 和验证证据要一起完成。只 push main 不算发布完成。
 
 ### 0.6 开发方案与开发清单
 
@@ -209,7 +211,7 @@ Trellis 是中大型任务记忆层，不替代 DXM。
 
 交付层级必须从用户任务推导：`修复/启用/生效/正常运行` 等行为目标要求运行态证据；明确 **source-only** 的任务可以只交源码，但必须记录 `unverified_boundaries`，且不得宣称已生效、已部署或线上已修复。拿不到原始目标所需证据时报告 partial/blocked，不得静默缩小目标。
 
-运行态 evidence kind 至少记录一个 **structured observation**：`observed_at`、`subject`、`method`、`result`、`summary`；项目内 artifact 可带 `path` + `sha256`。isolated 证据必须额外写 `final_artifact: true` 和 `decisive_branch`，单纯进程/窗口启动不算 E2E。release/deploy/live-data/multi-module architecture 等高风险任务必须设置 `independent_review_required: true`，并由不同 Agent 产出新鲜 `independent_review` PASS；回执还必须用 `artifact_sha256` 绑定 task/run 目录的 canonical `independent-review.md`，文件顶层 `reviewer_id`、带时区 `reviewed_at`、`verdict: PASS` 与回执一致。普通小修不强制。
+运行态 evidence kind 至少记录一个 **structured observation**：`observed_at`、`subject`、`method`、`result`、`summary`；项目内 artifact 可带 `path` + `sha256`。isolated 证据必须额外写 `final_artifact: true` 和 `decisive_branch`，单纯进程/窗口启动不算 E2E。release/deploy/live-data/multi-module architecture 等高风险任务必须设置 `independent_review_required: true`，并由不同 Agent 产出新鲜 `independent_review` PASS；回执还必须用 `artifact_sha256` 绑定 task/run 目录的 canonical `independent-review.md`，文件顶层 `reviewer_id`、带时区 `reviewed_at`、`verdict: PASS` 与回执一致。这个本地门只校验证据一致性和 reviewer 字段分离，不构成可信身份认证；baseline 选择 `profile: high-assurance` 时，还必须在独立可信边界验证并记录 `external_provenance`。普通小修不强制。
 
 ## 4. 文档更新规范
 
@@ -272,7 +274,7 @@ schema 必须与 validator 一致：
 - `requirements[]` 精确覆盖 run outcomes，每项包含 `id`、`status`（完成时为 `passed`）和 `evidence_kinds`；
 - `evidence` 按 requirement ID、kind 映射到安全证据引用列表；
 - `baseline_impact` 与 `unverified_boundaries` 必须和 bound run 一致；
-- 高风险任务提供不同 Agent 的 `independent_review` PASS，并 hash-bind canonical `independent-review.md`；
+- 高风险任务提供不同 Agent 的 `independent_review` PASS，并 hash-bind canonical `independent-review.md`；local review 不能替代可信身份或外部 provenance；
 - `adversarial_check.passed` 与摘要；
 - `quality_checks` 下的 `docs`、`encoding`、`secrets`、`rollback` 布尔结果；
 - `trellis.required`，以及适用时的 `task`、`check_passed`、`finished` 真实状态；
@@ -305,6 +307,6 @@ Trellis 只用于中大型开发任务的 PRD、任务状态和检查沉淀。�
 | 用户明确 scaffold only / 先别问 | 只 scaffold，不 grill，不建 task |
 
 启用 Trellis 时必须保持 `session_auto_commit: false`，并遵守本项目 Git/PR 授权规则。
-每个可写 task 先建 `.dxm/runs/<run_id>/run.json`；source-only 写 `unverified_boundaries`，运行态使用 fresh structured observation，high-risk 需要 `independent_review`。Trellis 最后按 `finish` → `archive <task> --no-commit` → schema_version: 2 归档回执校验收口。
+每个可写 task 先建 `.dxm/runs/<run_id>/run.json`；source-only 必须记录 `unverified_boundaries`。运行态声明用带 `observed_at` 的 structured observation；high-risk 要 hash-bound canonical `independent-review.md`，但它只证明本地一致性；`high-assurance` 还要 external provenance。Trellis 最后按 `finish` → `archive <task> --no-commit` → schema_version: 2 归档回执收口。
 
 <!-- DXM-TRELLIS:END -->

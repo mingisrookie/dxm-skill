@@ -47,16 +47,17 @@ DXM 不是一次性模板生成器。它把“项目规则、开工前澄清、�
 
 完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。README 只保留最近一版重点，避免发布时双份维护。
 
-**v1.2.0 - 2026-08-01**
+**v2.0.0 - 2026-08-03**
 
 | 更新 | 作用 |
 | --- | --- |
-| 任务目标绑定 | 每个可写任务先建立 lightweight run；receipt v2 绑定 run hash、task outcomes 和 baseline impact，Agent 不能静默缩小目标。 |
-| 运行态证据门 | 源码、配置或单测不再单独证明运行态；structured observation、artifact hash 与 isolated 决定性分支按任务声明校验。 |
-| 高风险独立复核 | 发布、部署等 high-risk 工作必须由不同 Agent 复核，并 hash-bind canonical review artifact。 |
-| 安全与迁移 | 收紧 Windows run ID、review 替换、pass-padding、敏感错误回显和 legacy receipt；旧 contract marker 1 可非破坏式刷新。 |
+| 真实 init 结果 | 显式 `--mode init` 的退出码改为最终 readiness；`--output json` 分开报告写入操作与 `READY/PARTIAL/BROKEN`，不再把 PARTIAL 当成功。 |
+| 可恢复本地写入 | 加入项目锁、同目录原子替换、事务 journal、显式 `--recover` 与稳定错误码；发现中断事务或 stale lock 会先停止。 |
+| 本地状态隐私 | Git worktree 自动维护可移植 `.gitignore` 块，audit 会把已跟踪 `.dxm/` 判为 BROKEN，绝不自动改 Git index。 |
+| 安全输入与产品入口 | 文件快照改为受限 JSON 数据，新增 policy、`dxm.py` 的 `init/scaffold-only/status/doctor/recover` 入口，收紧 schema、可移植路径和 Trellis 配置更新。 |
+| 审查语义与协作同步 | 明确 local independent review 只证明证据一致性/字段分离；`high-assurance` 需独立可信边界的 provenance。bounded grill 与 Trellis 注入规则同步为同一 0–3 问题契约。 |
 
-完整更新记录：[v1.1.0...v1.2.0](https://github.com/mingisrookie/dxm-skill/compare/v1.1.0...v1.2.0)
+完整更新记录：[v1.2.0...v2.0.0](https://github.com/mingisrookie/dxm-skill/compare/v1.2.0...v2.0.0)
 
 ---
 
@@ -113,6 +114,17 @@ install-skill-from-github.py --repo mingisrookie/dxm-skill --path skills/dxm
 python skills/dxm/scripts/scaffold_dxm.py --mode scaffold-only --root /path/to/project
 ```
 
+v2 的产品入口也提供相同的最小命令面；适合编排器或维护者直接调用：
+
+```bash
+python skills/dxm/scripts/dxm.py status --root /path/to/project
+python skills/dxm/scripts/dxm.py doctor --root /path/to/project
+python skills/dxm/scripts/dxm.py scaffold-only --root /path/to/project --refresh-blocks
+python skills/dxm/scripts/dxm.py recover --root /path/to/project
+```
+
+所有写入调用都必须显式给出 `--mode init` 或 `--mode scaffold-only`；旧式省略模式调用以 `DXM_E_MODE_REQUIRED` 退出。`init` 的进程退出码就是最终 readiness，`scaffold-only` 只表示模板操作完成并固定报告 `NOT_EVALUATED`。自动化请使用 `--output json`：写入结果固定含 `operation`、`readiness`、实际 `exit_code`、`issues` 与适用的 `error_code`，并以 `readiness_exit_code` 单列审计态；已请求 JSON 的参数边界错误也返回同一结构和 `DXM_E_INVALID_ARGUMENTS`。不要只凭文件已写入判断项目 READY。
+
 `init` 的项目事实持久化在 `<project-root>/.dxm/project.json`。该本地 JSON 保留规范化绝对 root；共享 Markdown 只写可移植投影：先对绝对路径 token 做词法规范化并把 root/子路径映射为 `$PROJECT_ROOT`，无法安全归属的剩余绝对路径收敛为 `$ABSOLUTE_PATH`，避免 `..` 或换 clone 路径产生漂移。先准备符合 schema 的 UTF-8 JSON 基线，再让 scaffold 校验、复制并把受管基线块写入链路文档：
 
 ```bash
@@ -133,11 +145,15 @@ python skills/dxm/scripts/scaffold_dxm.py --mode scaffold-only --root /path/to/p
 python skills/dxm/scripts/scaffold_dxm.py --mode scaffold-only --root /path/to/project --refresh-blocks
 ```
 
+目标已有有效 `.dxm/project.json` 时，刷新会重新水合链路文档中的 baseline managed block，但不会改写该 JSON。
+
 生成更深的初始文件结构快照：
 
 ```bash
 python skills/dxm/scripts/scaffold_dxm.py --mode scaffold-only --root /path/to/project --inventory-depth 2
 ```
+
+文件快照不读取文件内容，并以受限 JSON 数据块输出；默认跳过 `.dxm`、`.trellis`、`.agents`、`.codex` 等工具状态，且受 policy 中的深度、条目、字节和耗时上限约束。
 
 安装后自检：
 
@@ -152,6 +168,8 @@ python skills/dxm/scripts/scaffold_dxm.py --mode scaffold-only --root /path/to/p
 ```
 
 目标 root 已存在时必须是目录。所有受管目标及其已存在祖先必须留在规范化 root 内、是预期的普通目录/文件，且不得通过 symlink、reparse point 或多硬链接文件改写其他位置；任何一项不满足都会在首次写入前以 exit `2` 终止，不留半套文档。
+
+写入使用项目锁和同目录原子替换；若进程中断而留下 `.dxm/transactions/` journal，下一次写入会以 `DXM_E_RECOVERY_REQUIRED` 停止。`audit`、`doctor` 和 receipt 校验共同把 active/stale/malformed lock、未完成 journal 或残留 committed journal 判为非 READY；`recover` 会先拒绝 link/reparse state、伪造 operation ID、错配 journal 文件名和不完整 entry，再恢复。先运行 `python skills/dxm/scripts/scaffold_dxm.py --recover --root /path/to/project`；清理 stale lock 还必须显式加 `--break-stale-lock`。DXM 不会自动处理 Git 已跟踪的本地状态。
 
 只有明确需要覆盖已有 DXM 目标文件、且接受丢失人工内容风险时才使用：
 
@@ -181,6 +199,7 @@ python skills/dxm/scripts/validate_dxm.py receipt --root /path/to/project --file
 ```
 
 - `audit` 检查五份 DXM 文档、真实 Markdown managed marker、`.dxm/project.json`、根目录一致性及可选 Trellis 完整性；完整 fenced/inline code 中的 marker 示例不算活动块，未闭合 fence 不能掩盖错误。需要 Trellis 时追加 `--require-trellis`。
+- Git worktree 的 `audit` 同时检查 `.gitignore` 托管块、`.dxm/project.json` 忽略状态和已跟踪的 `.dxm/`；已跟踪状态为 `BROKEN`，只能由维护者人工解除跟踪。
 - `baseline` 只校验项目基线 schema。
 - `run` 校验 canonical root/path、可移植且不会折叠为 Windows 路径别名的 run_id、时间、scope、outcomes、baseline impact、risk 与 Trellis 路由。
 - `baseline` / `run` / `receipt` 会拒绝高置信凭据，错误只报告安全字段路径，不回显 key/value。
@@ -278,6 +297,8 @@ skills/dxm/
 ├── VERSION
 ├── agents/
 │   └── openai.yaml
+├── contract/
+│   └── policy.json
 ├── assets/
 │   └── templates/
 │       ├── AGENTS.md.template
@@ -288,6 +309,11 @@ skills/dxm/
 ├── references/
 │   └── dxm-method.md
 └── scripts/
+    ├── dxm.py
+    ├── dxm_git.py
+    ├── dxm_inventory.py
+    ├── dxm_io.py
+    ├── dxm_policy.py
     ├── scaffold_dxm.py
     ├── dxm_contract.py
     └── validate_dxm.py
@@ -301,6 +327,9 @@ DXM 默认保守：
 
 - 不静默覆盖已有项目文档。
 - 写前拒绝非目录 root、非目录祖先、symlink/reparse target 和多硬链接受管文件。
+- 多文件本地写入用 project lock、atomic replace 和可恢复 journal 串联；外部 `trellis init` 本身不被伪装成可回滚的 DXM 文件事务。
+- Git worktree 的 `.dxm/` 必须被可移植 `.gitignore` 托管块忽略；已跟踪状态停止 readiness，而不是被脚本静默删除。
+- 文件结构快照视为不可信数据，不解释文件名或读取文件内容。
 - 不回显真实 token、密码、API Key、账号明细、验证码或密钥内容。
 - 只基于文件、命令输出、测试、日志、diff 和真实运行行为下结论。
 - 最终回执必须说明改了什么、验证了什么、跳过了什么、还有什么风险。
@@ -324,6 +353,7 @@ $core = Join-Path $temp "dxm"
 New-Item -ItemType Directory -Path $temp | Out-Null
 Copy-Item -Recurse -LiteralPath "skills/dxm" -Destination $core
 python "$core/scripts/scaffold_dxm.py" --self-test
+python "$core/scripts/dxm.py" --version
 python "$core/scripts/validate_dxm.py" --version
 Remove-Item -Recurse -Force -LiteralPath $temp
 ```

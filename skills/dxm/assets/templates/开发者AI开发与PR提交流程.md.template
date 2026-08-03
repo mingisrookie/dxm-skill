@@ -140,6 +140,8 @@ gh pr view <PR_NUMBER> --json number,title,baseRefName,headRefName,state,isDraft
 6. 中文更新日志：Release notes 默认使用中文，至少包含“更新日志 / 验证 / 完整更新记录”。
 7. 对比链接：Release notes 必须包含上一版本到当前版本的对比链接。
 8. 验证证据：Release notes 和最终回执都必须列出实际运行过的测试、自检、版本/tag/latest 核验结果。
+9. 可下载产物：若发布提供 zip、wheel、exe 或其他用户下载物，必须生成 SHA-256 manifest，发布后重新下载并比对 hash；源码通过不等于最终下载包通过。
+10. high-assurance 发布：除本地独立复核外，必须在受保护的独立 CI/OIDC 或等效可信边界验证 attestation/provenance；本地 reviewer 名称和 SHA-256 不得表述为身份认证。
 
 授权边界：未获明确授权时，只能准备版本文件、`CHANGELOG.md`、Release notes 草稿和待执行命令清单；只有用户明确要求发布/推送/tag/release 后，才允许执行远端写操作。
 
@@ -157,7 +159,7 @@ gh release view $tag -R $repo --json tagName,name,body,url,publishedAt
 gh api repos/$repo/releases/latest --jq .tag_name
 ```
 
-`gh api repos/$repo/releases/latest --jq .tag_name` 必须返回当前 `$tag`，否则不能声称 `Latest` 已更新。本地 HEAD、远端分支和 tag 指向的提交必须一致，不能让 tag 指到旧提交。
+`gh api repos/$repo/releases/latest --jq .tag_name` 必须返回当前 `$tag`，否则不能声称 `Latest` 已更新。本地 HEAD、远端分支和 tag 指向的提交必须一致，不能让 tag 指到旧提交。存在发布附件时还要 `gh release download $tag` 到干净目录，使用 SHA-256 manifest 比对重新下载的最终文件。
 
 如果 `main` 已推送但 `VERSION`、`CHANGELOG.md`、tag、`GitHub Release` 或 `Latest` 没同步，发布不算完成。
 

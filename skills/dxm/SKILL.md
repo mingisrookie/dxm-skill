@@ -54,14 +54,14 @@ Redirect instead of initializing when the lock points at a leaf subdirectory, ve
 
 ## `/dxm` execution
 
-After locking `init` or `scaffold-only`, resolve `scripts/scaffold_dxm.py` relative to this skill directory and pass the locked write mode explicitly:
+After locking `init` or `scaffold-only`, resolve the copied-skill command router (or its underlying scaffold script) relative to this skill directory and pass the locked write mode explicitly:
 
 ```text
-python "<skill-dir>/scripts/scaffold_dxm.py" --mode scaffold-only --root "<project-root>"
-python "<skill-dir>/scripts/scaffold_dxm.py" --mode init --root "<project-root>" --baseline "<baseline.json>"
+python "<skill-dir>/scripts/dxm.py" scaffold-only --root "<project-root>"
+python "<skill-dir>/scripts/dxm.py" init --root "<project-root>" --baseline "<baseline.json>"
 ```
 
-`--mode init` rejects a missing baseline before any project write; `--mode scaffold-only` rejects `--baseline` and never reports READY. The legacy no-`--mode` CLI remains compatibility-only and cannot prove that the agent completed the init gate. Preserve existing hand-maintained content unless the user explicitly authorizes overwrite.
+`--mode init` rejects a missing baseline before any project write; `--mode scaffold-only` rejects `--baseline` and never reports READY. DXM v2 rejects a no-`--mode` write call with `DXM_E_MODE_REQUIRED`; an explicit init exits with the final audit code (`READY=0` / `BROKEN=2` / `PARTIAL=3` / `ABSENT=4`). Use `--output json` whenever an orchestrator must distinguish a completed write operation from readiness. Preserve existing hand-maintained content unless the user explicitly authorizes overwrite.
 
 Ensure the project root contains:
 
@@ -71,7 +71,7 @@ Ensure the project root contains:
 - `项目文件结构说明.md`
 - `开发者AI开发与PR提交流程.md`
 
-After scaffold, run the packaged readiness audit. `ABSENT`, `PARTIAL`, `READY`, and `BROKEN` are distinct states; never turn `PARTIAL` or `BROKEN` into a success-style next step.
+After scaffold, run the packaged readiness audit. `ABSENT`, `PARTIAL`, `READY`, and `BROKEN` are distinct states; never turn `PARTIAL` or `BROKEN` into a success-style next step. Write JSON includes `operation`, `readiness`, actual `exit_code`, `issues`, and applicable `error_code` (with `readiness_exit_code` separately); requested JSON also covers argument-boundary failures as `DXM_E_INVALID_ARGUMENTS`. A write is guarded by a project lock, atomic replacement and a transaction journal; audit, doctor, and receipt validation treat active/stale/malformed locks or pending journals as non-ready. If a prior operation is interrupted, run `dxm.py recover --root "<project-root>"` before another write.
 
 If a real Markdown managed marker is orphaned, duplicated, or out of order, stop rather than appending another block; marker examples inside complete fenced/inline code are documentation, not active blocks. Do not overwrite existing project-specific docs unless the user explicitly accepts that loss. Baseline, run, and receipt validation reject high-confidence credential material without echoing its value.
 
@@ -92,15 +92,17 @@ Triggers: `/dxm trellis`, `/dxm 大开发`, `/dxm full`, or an explicit request 
 | Flag | Use |
 | --- | --- |
 | `--root <path>` | Locked target project root; defaults to current directory |
-| `--mode init` | Lock initialization; requires `--baseline` before any write |
-| `--mode scaffold-only` | Lock template-only writing; forbids baseline/readiness claims |
+| `--mode init` | Required initialization lock; requires `--baseline`, and exits with final readiness |
+| `--mode scaffold-only` | Required template-only writing lock; forbids baseline/readiness claims |
 | `--baseline <json-file>` | Validate and persist the `init` project baseline |
 | `--dry-run` | Report planned actions without writing files |
-| `--refresh-blocks` | Refresh managed blocks while preserving manual content outside them |
-| `--inventory-depth N` | Include nested paths in the initial structure seed (default 1) |
+| `--refresh-blocks` | Refresh managed blocks while preserving manual content; rehydrate an existing valid baseline block without rewriting its JSON |
+| `--inventory-depth N` | Include nested paths in the JSON-safe structure seed (default 1, policy-bounded) |
 | `--trellis`, `--trellis-user <name>` | Request Trellis initialization and safety blocks |
 | `--trellis-timeout-seconds N` | Maximum wait for `trellis init` (default 120) |
 | `--self-test` | Run installed-package smoke checks |
+| `--recover`, `--break-stale-lock` | Explicitly recover an interrupted local transaction; stale-lock removal is opt-in |
+| `--output text\|json`, `--redact-paths` | Stable automation output, optionally without local root paths |
 | `--allow-broad-root` | Use only after explicit confirmation of that broad root |
 | `--force` | Overwrite existing DXM target files only after explicit acceptance of manual-content loss |
 
@@ -149,7 +151,7 @@ Persisted baseline/PRD criteria define durable invariants, while the run outcome
 
 Unit tests or config/source inspection alone cannot prove those claims.
 
-Runtime-sensitive evidence uses a **structured observation** with `observed_at`, `subject`, `method`, `result`, and `summary`. When a project-local artifact `path` is supplied, include its `sha256`; the validator checks boundary, existence, and hash. An isolated proof additionally sets `isolated: true`, `final_artifact: true`, and a non-empty `decisive_branch`; merely launching a window is not an E2E. High-risk release/deploy/live-data/multi-module architecture work sets `independent_review_required: true` and needs a fresh `independent_review` PASS from an Agent different from the run author. The receipt uses `artifact_sha256` to bind canonical `independent-review.md` (`.trellis/tasks/.../<task>/` for Trellis, `.dxm/runs/<run_id>/` for run-only), whose top-level `reviewer_id`, timezone-aware `reviewed_at`, and `verdict: PASS` must match the review metadata. Normal small fixes do not.
+Runtime-sensitive evidence uses a **structured observation** with `observed_at`, `subject`, `method`, `result`, and `summary`. When a project-local artifact `path` is supplied, include its `sha256`; the validator checks boundary, existence, and hash. An isolated proof additionally sets `isolated: true`, `final_artifact: true`, and a non-empty `decisive_branch`; merely launching a window is not an E2E. High-risk release/deploy/live-data/multi-module architecture work sets `independent_review_required: true` and needs a fresh `independent_review` PASS from an Agent different from the run author. The receipt uses `artifact_sha256` to bind canonical `independent-review.md` (`.trellis/tasks/.../<task>/` for Trellis, `.dxm/runs/<run_id>/` for run-only), whose top-level `reviewer_id`, timezone-aware `reviewed_at`, and `verdict: PASS` must match the review metadata. This is a local evidence-consistency/reviewer-separation gate, not trusted identity proof. baseline `profile` supports `lite`, `standard` (default), and `high-assurance`; the latter also requires external provenance validated at an independent trusted boundary. Normal small fixes do not.
 
 Before reporting `init` or `task` complete, create a `schema_version: 2` machine-readable **completion receipt** and validate it. It binds `run_id` + `run_sha256`, task-specific `requirements[].id/status/evidence_kinds`, per-ID/per-kind `evidence`, `baseline_impact`, and `unverified_boundaries`; it also records `independent_review` when required, `adversarial_check`, `quality_checks` (`docs`, `encoding`, `secrets`, `rollback`), `trellis.required/task/check_passed/finished`, and `git.commit_performed/commit/push_performed/branch`. Default validation rejects legacy v1; `--legacy-v1` is historical audit-only and never proves current completion.
 

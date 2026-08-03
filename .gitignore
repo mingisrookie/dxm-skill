@@ -42,3 +42,7 @@ skills/typegpu/
 skills/waapi/
 skills/website-to-hyperframes/
 skills/website-to-video/
+
+# DXM:START
+.dxm/
+# DXM:END

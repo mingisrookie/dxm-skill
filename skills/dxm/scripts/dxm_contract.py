@@ -9,10 +9,21 @@ import json
 import os
 import re
 import stat
+import sys
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from dxm_git import audit_git_privacy
+from dxm_io import inspect_recovery_state
+from dxm_policy import PROFILES
 
 
 CONTRACT_VERSION = 2
@@ -85,6 +96,10 @@ WINDOWS_DEVICE_RUN_ID_RE = re.compile(
     re.IGNORECASE,
 )
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+EXTENSION_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{0,62}/[A-Za-z0-9][A-Za-z0-9._-]{0,126}$")
+WINDOWS_DEVICE_PART_RE = re.compile(
+    r"^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)", re.IGNORECASE
+)
 FUTURE_TOLERANCE = timedelta(minutes=5)
 CREDENTIAL_FIELD_SUFFIXES = (
     "apikey",
@@ -526,6 +541,29 @@ def _validate_string_list(value: Any, field: str, *, allow_empty: bool) -> list[
     return errors
 
 
+def _unsupported_fields(value: Any, allowed: set[str], label: str) -> list[str]:
+    if not isinstance(value, dict):
+        return []
+    unsupported = [key for key in value if key not in allowed]
+    if not unsupported:
+        return []
+    # Keys are untrusted input and can themselves contain credentials; retain
+    # the actionable schema error without echoing their contents.
+    return [f"{label} contains unsupported fields"]
+
+
+def _validate_extensions(value: Any, label: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, dict):
+        return [f"{label} must be an object when present"]
+    errors: list[str] = []
+    for key in value:
+        if not isinstance(key, str) or EXTENSION_KEY_RE.fullmatch(key) is None:
+            errors.append(f"{label} keys must use namespace/name form")
+    return errors
+
+
 def validate_baseline(data: Any, expected_root: Path | None = None) -> list[str]:
     """Return all baseline schema errors without exposing baseline values."""
 
@@ -533,6 +571,27 @@ def validate_baseline(data: Any, expected_root: Path | None = None) -> list[str]
         return ["baseline must be a JSON object"]
 
     errors: list[str] = []
+    errors.extend(
+        _unsupported_fields(
+            data,
+            {
+                "schema_version",
+                "project_root",
+                "profile",
+                "goal",
+                "primary_users",
+                "deliverables",
+                "non_goals",
+                "runtime",
+                "acceptance_criteria",
+                "validation_commands",
+                "assumptions",
+                "extensions",
+            },
+            "baseline",
+        )
+    )
+    errors.extend(_validate_extensions(data.get("extensions"), "baseline.extensions"))
     required = (
         "schema_version",
         "project_root",
@@ -551,6 +610,9 @@ def validate_baseline(data: Any, expected_root: Path | None = None) -> list[str]
 
     if type(data.get("schema_version")) is not int or data.get("schema_version") != BASELINE_SCHEMA_VERSION:
         errors.append(f"schema_version must be {BASELINE_SCHEMA_VERSION}")
+    profile = data.get("profile", "standard")
+    if profile not in PROFILES:
+        errors.append(f"profile must be one of: {', '.join(sorted(PROFILES))}")
 
     project_root = data.get("project_root")
     if not _is_nonempty_string(project_root):
@@ -575,6 +637,7 @@ def validate_baseline(data: Any, expected_root: Path | None = None) -> list[str]
     if not isinstance(runtime, dict):
         errors.append("runtime must be an object")
     else:
+        errors.extend(_unsupported_fields(runtime, {"entry_points", "facts"}, "runtime"))
         errors.extend(_validate_string_list(runtime.get("entry_points"), "runtime.entry_points", allow_empty=False))
         errors.extend(_validate_string_list(runtime.get("facts"), "runtime.facts", allow_empty=True))
 
@@ -590,6 +653,7 @@ def validate_baseline(data: Any, expected_root: Path | None = None) -> list[str]
             if not isinstance(item, dict):
                 errors.append(f"{prefix} must be an object")
                 continue
+            errors.extend(_unsupported_fields(item, {"id", "description", "evidence_kinds"}, prefix))
             acceptance_id = item.get("id")
             if not _is_nonempty_string(acceptance_id):
                 errors.append(f"{prefix}.id must be a non-empty string")
@@ -779,6 +843,7 @@ def baseline_markdown(data: dict[str, Any]) -> str:
         "## DXM 项目基线",
         "",
         f"- Schema version: `{BASELINE_SCHEMA_VERSION}`",
+        f"- Governance profile: `{data.get('profile', 'standard')}`",
         "- Project root: local canonical path stored in `.dxm/project.json`; not embedded in shared Markdown.",
         f"- Goal: {_portable_baseline_text(data['goal'], project_root)}",
         "",
@@ -1182,6 +1247,20 @@ def audit_project(root: Path, require_trellis: bool = False) -> AuditResult:
     if require_trellis:
         _audit_trellis(canonical_root, texts, partial, broken)
 
+    recovery = inspect_recovery_state(canonical_root)
+    if recovery.broken:
+        broken.extend(recovery.issues)
+    elif recovery.write_blocked:
+        partial.extend(recovery.issues)
+
+    git_privacy = audit_git_privacy(canonical_root)
+    if git_privacy.state == "tracked":
+        broken.extend(git_privacy.issues)
+    elif git_privacy.state in {"partial", "unavailable"}:
+        partial.extend(git_privacy.issues)
+    elif git_privacy.state == "broken":
+        broken.extend(git_privacy.issues)
+
     if broken:
         return AuditResult(canonical_root, BROKEN, tuple(dict.fromkeys(broken + partial)))
     if partial:
@@ -1214,6 +1293,17 @@ def _project_relative_path_error(value: Any, label: str) -> str | None:
     parts = normalized.split("/")
     if any(part in ("", ".", "..") for part in parts):
         return f"{label} must not contain empty, dot, or parent segments"
+    for part in parts:
+        if unicodedata.normalize("NFC", part) != part:
+            return f"{label} must use NFC-normalized portable path segments"
+        if part.endswith((" ", ".")):
+            return f"{label} must not contain path segments ending with spaces or dots"
+        if WINDOWS_DEVICE_PART_RE.match(part) is not None:
+            return f"{label} must not contain Windows reserved device names"
+        if any(ord(character) < 32 or character in '<>:"|?*' for character in part):
+            return f"{label} must use portable path characters"
+        if any("\u202a" <= character <= "\u202e" or character in "\u2066\u2067\u2068\u2069" for character in part):
+            return f"{label} must not contain bidirectional control characters"
     return None
 
 
@@ -1292,6 +1382,29 @@ def validate_run(
     assert data is not None
     errors: list[str] = []
     errors.extend(_credential_errors(data, "run"))
+    errors.extend(
+        _unsupported_fields(
+            data,
+            {
+                "schema_version",
+                "run_id",
+                "project_root",
+                "workflow_mode",
+                "started_at",
+                "author",
+                "goal",
+                "scope",
+                "outcomes",
+                "baseline_impact",
+                "risk",
+                "trellis",
+                "unverified_boundaries",
+                "extensions",
+            },
+            "run",
+        )
+    )
+    errors.extend(_validate_extensions(data.get("extensions"), "run.extensions"))
 
     if type(data.get("schema_version")) is not int or data.get("schema_version") != RUN_SCHEMA_VERSION:
         errors.append(f"schema_version must be {RUN_SCHEMA_VERSION}")
@@ -1327,6 +1440,7 @@ def validate_run(
     if not isinstance(scope, dict):
         errors.append("scope must be an object")
     else:
+        errors.extend(_unsupported_fields(scope, {"paths", "exclusions", "external_targets"}, "scope"))
         paths = scope.get("paths")
         errors.extend(_validate_string_list(paths, "scope.paths", allow_empty=False))
         if isinstance(paths, list):
@@ -1354,6 +1468,13 @@ def validate_run(
             if not isinstance(outcome, dict):
                 errors.append(f"{prefix} must be an object")
                 continue
+            errors.extend(
+                _unsupported_fields(
+                    outcome,
+                    {"id", "description", "claim_type", "evidence_kinds"},
+                    prefix,
+                )
+            )
             outcome_id = outcome.get("id")
             if not _is_nonempty_string(outcome_id):
                 errors.append(f"{prefix}.id must be a non-empty string")
@@ -1378,6 +1499,7 @@ def validate_run(
     if not isinstance(risk, dict):
         errors.append("risk must be an object")
     else:
+        errors.extend(_unsupported_fields(risk, {"level", "reasons", "independent_review_required"}, "risk"))
         level = risk.get("level")
         if level not in ("normal", "high"):
             errors.append("risk.level must be normal or high")
@@ -1393,10 +1515,12 @@ def validate_run(
     trellis = data.get("trellis")
     if not isinstance(trellis, dict) or not isinstance(trellis.get("required"), bool):
         errors.append("trellis.required must be a boolean")
-    elif trellis["required"]:
+    else:
+        errors.extend(_unsupported_fields(trellis, {"required", "task"}, "trellis"))
+    if isinstance(trellis, dict) and trellis.get("required") is True:
         if not _is_nonempty_string(trellis.get("task")):
             errors.append("trellis.task must name the required task")
-    elif trellis.get("task") is not None:
+    elif isinstance(trellis, dict) and trellis.get("required") is False and trellis.get("task") is not None:
         errors.append("trellis.task must be null when Trellis is not required")
 
     boundaries = data.get("unverified_boundaries")
@@ -1704,6 +1828,31 @@ def _validate_legacy_receipt(
     assert data is not None
     errors: list[str] = []
     errors.extend(_credential_errors(data, "receipt"))
+    errors.extend(
+        _unsupported_fields(
+            data,
+            {
+                "schema_version",
+                "run_id",
+                "run_sha256",
+                "workflow_mode",
+                "project_root",
+                "requirements",
+                "evidence",
+                "baseline_impact",
+                "unverified_boundaries",
+                "adversarial_check",
+                "quality_checks",
+                "trellis",
+                "git",
+                "independent_review",
+                "external_provenance",
+                "extensions",
+            },
+            "receipt",
+        )
+    )
+    errors.extend(_validate_extensions(data.get("extensions"), "receipt.extensions"))
 
     if type(data.get("schema_version")) is not int or data.get("schema_version") != LEGACY_RECEIPT_SCHEMA_VERSION:
         errors.append(f"schema_version must be {LEGACY_RECEIPT_SCHEMA_VERSION}")
@@ -1734,6 +1883,7 @@ def _validate_legacy_receipt(
             if not isinstance(requirement, dict):
                 errors.append(f"{prefix} must be an object")
                 continue
+            errors.extend(_unsupported_fields(requirement, {"id", "status", "evidence_kinds"}, prefix))
             requirement_id = requirement.get("id")
             if not _is_nonempty_string(requirement_id):
                 errors.append(f"{prefix}.id must be a non-empty string")
@@ -1780,6 +1930,7 @@ def _validate_legacy_receipt(
     if not isinstance(adversarial, dict):
         errors.append("adversarial_check must be an object")
     else:
+        errors.extend(_unsupported_fields(adversarial, {"passed", "summary"}, "adversarial_check"))
         if adversarial.get("passed") is not True:
             errors.append("adversarial_check.passed must be true")
         if not _is_nonempty_string(adversarial.get("summary")):
@@ -1789,6 +1940,7 @@ def _validate_legacy_receipt(
     if not isinstance(quality, dict):
         errors.append("quality_checks must be an object")
     else:
+        errors.extend(_unsupported_fields(quality, set(QUALITY_CHECKS), "quality_checks"))
         for name in QUALITY_CHECKS:
             if quality.get(name) is not True:
                 errors.append(f"quality_checks.{name} must be true")
@@ -1858,6 +2010,24 @@ def _validate_observation(
     errors: list[str] = []
     if not isinstance(observation, dict):
         return [f"{label} must be a structured observation"]
+    errors.extend(
+        _unsupported_fields(
+            observation,
+            {
+                "observed_at",
+                "subject",
+                "method",
+                "result",
+                "summary",
+                "path",
+                "sha256",
+                "isolated",
+                "final_artifact",
+                "decisive_branch",
+            },
+            label,
+        )
+    )
     observed_at = _parse_timestamp(observation.get("observed_at"), f"{label}.observed_at", errors)
     if observed_at is not None:
         if observed_at < started_at:
@@ -1920,6 +2090,13 @@ def _validate_independent_review(
     if not isinstance(review, dict):
         return ["independent_review must be an object when required"] if required else []
     errors: list[str] = []
+    errors.extend(
+        _unsupported_fields(
+            review,
+            {"reviewer", "reviewed_at", "verdict", "summary", "artifact", "artifact_sha256"},
+            "independent_review",
+        )
+    )
     reviewer = review.get("reviewer")
     if not _is_nonempty_string(reviewer):
         errors.append("independent_review.reviewer must be a non-empty string")
@@ -2027,6 +2204,38 @@ def _validate_independent_review(
     return errors
 
 
+def _validate_external_provenance(value: Any, *, required: bool) -> list[str]:
+    """Validate only the shape of externally verifiable provenance evidence.
+
+    Local validation deliberately does not claim to authenticate an external
+    identity or verify a remote attestation; callers must do that in the
+    declared CI/release boundary.
+    """
+
+    if value is None:
+        return ["external_provenance is required by the high-assurance profile"] if required else []
+    if not isinstance(value, dict):
+        return ["external_provenance must be an object"]
+    errors = _unsupported_fields(
+        value,
+        {"provider", "subject", "uri", "sha256", "verified_at"},
+        "external_provenance",
+    )
+    for field in ("provider", "subject"):
+        if not _is_nonempty_string(value.get(field)):
+            errors.append(f"external_provenance.{field} must be a non-empty string")
+    uri = value.get("uri")
+    if not _is_nonempty_string(uri) or not re.match(r"^https://[^\s]+$", uri):
+        errors.append("external_provenance.uri must be an HTTPS URL")
+    digest = value.get("sha256")
+    if not _is_nonempty_string(digest) or SHA256_RE.fullmatch(str(digest)) is None:
+        errors.append("external_provenance.sha256 must be a lowercase SHA-256 digest")
+    timestamp_errors: list[str] = []
+    _parse_timestamp(value.get("verified_at"), "external_provenance.verified_at", timestamp_errors)
+    errors.extend(timestamp_errors)
+    return errors
+
+
 def _validate_completion_project(root: Path, *, require_trellis: bool) -> list[str]:
     audit = audit_project(root, require_trellis=require_trellis)
     if audit.state == READY:
@@ -2065,6 +2274,31 @@ def _validate_receipt_v2(
     assert data is not None
     errors: list[str] = []
     errors.extend(_credential_errors(data, "receipt"))
+    errors.extend(
+        _unsupported_fields(
+            data,
+            {
+                "schema_version",
+                "run_id",
+                "run_sha256",
+                "workflow_mode",
+                "project_root",
+                "requirements",
+                "evidence",
+                "baseline_impact",
+                "unverified_boundaries",
+                "adversarial_check",
+                "quality_checks",
+                "trellis",
+                "git",
+                "independent_review",
+                "external_provenance",
+                "extensions",
+            },
+            "receipt",
+        )
+    )
+    errors.extend(_validate_extensions(data.get("extensions"), "receipt.extensions"))
 
     if type(data.get("schema_version")) is not int or data.get("schema_version") != RECEIPT_SCHEMA_VERSION:
         errors.append(f"schema_version must be {RECEIPT_SCHEMA_VERSION}")
@@ -2135,6 +2369,7 @@ def _validate_receipt_v2(
             if not isinstance(requirement, dict):
                 errors.append(f"{prefix} must be an object")
                 continue
+            errors.extend(_unsupported_fields(requirement, {"id", "status", "evidence_kinds"}, prefix))
             requirement_id = requirement.get("id")
             if not _is_nonempty_string(requirement_id):
                 errors.append(f"{prefix}.id must be a non-empty string")
@@ -2229,6 +2464,7 @@ def _validate_receipt_v2(
     if not isinstance(adversarial, dict):
         errors.append("adversarial_check must be an object")
     else:
+        errors.extend(_unsupported_fields(adversarial, {"passed", "summary"}, "adversarial_check"))
         if adversarial.get("passed") is not True:
             errors.append("adversarial_check.passed must be true")
         if not _is_nonempty_string(adversarial.get("summary")):
@@ -2238,6 +2474,7 @@ def _validate_receipt_v2(
     if not isinstance(quality, dict):
         errors.append("quality_checks must be an object")
     else:
+        errors.extend(_unsupported_fields(quality, set(QUALITY_CHECKS), "quality_checks"))
         for name in QUALITY_CHECKS:
             if quality.get(name) is not True:
                 errors.append(f"quality_checks.{name} must be true")
@@ -2247,6 +2484,13 @@ def _validate_receipt_v2(
     if not isinstance(trellis, dict) or not isinstance(trellis.get("required"), bool):
         errors.append("trellis.required must be a boolean")
     else:
+        errors.extend(
+            _unsupported_fields(
+                trellis,
+                {"required", "task", "check_passed", "finished", "check_artifact"},
+                "trellis",
+            )
+        )
         require_trellis = trellis["required"]
         if require_trellis:
             if not _is_nonempty_string(trellis.get("task")):
@@ -2272,6 +2516,7 @@ def _validate_receipt_v2(
     if not isinstance(git, dict):
         errors.append("git must be an object")
     else:
+        errors.extend(_unsupported_fields(git, {"commit_performed", "commit", "push_performed", "branch"}, "git"))
         commit_performed = git.get("commit_performed")
         push_performed = git.get("push_performed")
         if not isinstance(commit_performed, bool):
@@ -2287,7 +2532,24 @@ def _validate_receipt_v2(
         elif not push_performed and git.get("branch") is not None:
             errors.append("git.branch must be null when push_performed is false")
 
+    provenance_checked = False
     if canonical_root is not None:
+        try:
+            completion_baseline = load_baseline(
+                canonical_root / ".dxm" / "project.json",
+                expected_root=canonical_root,
+                require_trusted_path=True,
+            )
+        except ContractError:
+            completion_baseline = None
+        profile = completion_baseline.get("profile", "standard") if completion_baseline is not None else "standard"
+        errors.extend(
+            _validate_external_provenance(
+                data.get("external_provenance"),
+                required=profile == "high-assurance",
+            )
+        )
+        provenance_checked = True
         errors.extend(_validate_completion_project(canonical_root, require_trellis=require_trellis))
         if require_trellis and isinstance(trellis, dict):
             errors.extend(_validate_trellis_receipt(canonical_root, trellis))
@@ -2311,6 +2573,8 @@ def _validate_receipt_v2(
                     required=review_required,
                 )
             )
+    if not provenance_checked:
+        errors.extend(_validate_external_provenance(data.get("external_provenance"), required=False))
     return errors
 
 
