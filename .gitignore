@@ -8,7 +8,7 @@ Thumbs.db
 .agents/
 agent/
 
-# Local DXM/Trellis dogfood state may contain absolute roots and task receipts.
+# Private local state from earlier tool versions must never enter releases.
 # Keep the reusable skill, tests, and long-term docs in releases instead.
 .codex/
 .dxm/
@@ -42,7 +42,3 @@ skills/typegpu/
 skills/waapi/
 skills/website-to-hyperframes/
 skills/website-to-video/
-
-# DXM:START
-.dxm/
-# DXM:END

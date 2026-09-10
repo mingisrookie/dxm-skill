@@ -1,74 +1,30 @@
 ---
 name: domain-modeling
-description: Use when clarifying domain terminology, maintaining CONTEXT.md or CONTEXT-MAP.md, recording ADRs, or another skill must keep the project domain model current.
+description: 需要明确业务术语、领域边界或记录重要架构取舍时使用。只读取术语不触发写作；按授权维护现有领域文档，不强制创建新文件。
 ---
 
 # Domain Modeling
 
-Actively build and sharpen the project's domain model as you design. This is the *active* discipline — challenging terms, inventing edge-case scenarios, and writing the glossary and decisions down the moment they crystallise. (Merely *reading* `CONTEXT.md` for vocabulary is not this skill — that's a one-line habit any skill can do. This skill is for when you're changing the model, not just consuming it.)
+补齐模型无法自行推断的业务语义和决策历史，不把一般编程知识改写成术语表。本技能可以单独安装。
 
-## File structure
+## 权限和文档位置
 
-Most repos have a single context:
+先查项目已有术语表、上下文地图、设计说明或决策记录。只读请求只分析，不自动写文件；访谈中达成理解也不代表已经获准落盘。用户已授权维护文档时，按确认的范围修改，不重复询问已批准的普通步骤。
 
-```
-/
-├── CONTEXT.md
-├── docs/
-│   └── adr/
-│       ├── 0001-event-sourced-orders.md
-│       └── 0002-postgres-for-write-model.md
-└── src/
-```
+优先更新已有合适文档。没有合适位置且确有持久价值时，再按授权创建 `CONTEXT.md`、上下文地图或 ADR；这些文件名是可选约定，不是项目必须满足的结构。
 
-If a `CONTEXT-MAP.md` exists at the root, the repo has multiple contexts. The map points to where each one lives:
+## 术语与边界
 
-```
-/
-├── CONTEXT-MAP.md
-├── docs/
-│   └── adr/                          ← system-wide decisions
-├── src/
-│   ├── ordering/
-│   │   ├── CONTEXT.md
-│   │   └── docs/adr/                 ← context-specific decisions
-│   └── billing/
-│       ├── CONTEXT.md
-│       └── docs/adr/
-```
+对有歧义或冲突的业务词给出具体场景，区分不同主体、状态和关系，必要时请用户裁决。核对代码和用户描述，明确哪些是现状、期望或假设，不将猜测写成已接受事实。
 
-Create files lazily — only when you have something to write. If no `CONTEXT.md` exists, create one when the first term is resolved. If no `docs/adr/` exists, create it when the first ADR is needed.
+术语表只解释业务概念、边界及容易混淆的用法。实现细节留在设计或决策记录，不混入业务定义。多个领域存在同名不同义时保留各自上下文，不强行统一。
 
-## During the session
+获准写入且术语已经确认后，只更新受影响条目。可参考 [术语格式](CONTEXT-FORMAT.md)，但保留项目现有结构。
 
-### Challenge against the glossary
+## 重要取舍
 
-When the user uses a term that conflicts with the existing language in `CONTEXT.md`, call it out immediately. "Your glossary defines 'cancellation' as X, but you seem to mean Y — which is it?"
+当决策难以逆转、脱离背景难以理解且确实比较过有意义的替代方案时，记录原因、被排除的选择及关键后果。普通可逆选择无需单独 ADR。
 
-### Sharpen fuzzy language
+可参考 [决策格式](ADR-FORMAT.md)。先扫描已有记录，避免重复、覆盖或编号冲突。未获批准的选择标为提议，不伪装为已接受决定。
 
-When the user uses vague or overloaded terms, propose a precise canonical term. "You're saying 'account' — do you mean the Customer or the User? Those are different things."
-
-### Discuss concrete scenarios
-
-When domain relationships are being discussed, stress-test them with specific scenarios. Invent scenarios that probe edge cases and force the user to be precise about the boundaries between concepts.
-
-### Cross-reference with code
-
-When the user states how something works, check whether the code agrees. If you find a contradiction, surface it: "Your code cancels entire Orders, but you just said partial cancellation is possible — which is right?"
-
-### Update CONTEXT.md inline
-
-When a term is resolved, update `CONTEXT.md` right there. Don't batch these up — capture them as they happen. Use the format in [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md).
-
-`CONTEXT.md` should be totally devoid of implementation details. Do not treat `CONTEXT.md` as a spec, a scratch pad, or a repository for implementation decisions. It is a glossary and nothing else.
-
-### Offer ADRs sparingly
-
-Only offer to create an ADR when all three are true:
-
-1. **Hard to reverse** — the cost of changing your mind later is meaningful
-2. **Surprising without context** — a future reader will wonder "why did they do it this way?"
-3. **The result of a real trade-off** — there were genuine alternatives and you picked one for specific reasons
-
-If any of the three is missing, skip the ADR. Use the format in [ADR-FORMAT.md](./ADR-FORMAT.md).
+交付说明哪些业务事实已确认、哪些文档实际改变、哪些问题仍未解决。无需新建任务、状态文件或调用其他技能。

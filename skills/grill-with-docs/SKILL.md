@@ -1,22 +1,18 @@
 ---
 name: grill-with-docs
-description: Use when requirements or a plan must be clarified against existing code, docs, runtime evidence, domain terminology, glossary entries, ADRs, or documented decisions.
+description: 需要结合已有代码、文档、配置、测试或领域决策澄清需求时使用。先核查可获得的证据，只追问影响下一步的重要未知；默认不启动逐题长访谈。
 ---
 
-# Grill With Docs
+# 基于证据的 Grill
 
-Ground clarification in the locked project scope. Start from first principles: identify the real outcome, hard constraints, local facts, and unknown blockers, then challenge hidden assumptions, fake constraints, over-scoped solutions, and implementation bias. Use **local evidence first**: inspect the relevant code, docs, config, tests, logs, and safe runtime state before asking the user.
+可以独立使用，不依赖其他技能。先确认本次目标和允许读取的范围，读取相关证据，不把整个仓库或历史聊天作为默认必读材料。
 
-## Default bounded route
+区分现有实现、文档声明、用户意图和待确认假设。文档可能过时，代码也未必符合业务要求；发现冲突先给出依据，不把当前实现当成不可改变的需求。挑战隐藏假设和实现偏置，比较最小有效方案及其代价。
 
-For DXM bootstrap or normal clarification, ask **0–3 blocking questions in one batch**. State recommended assumptions for non-blocking choices and proceed when the user says `按推荐走`, `直接做`, or equivalent. Do not invoke the one-question-per-turn `grilling` cadence by default.
+普通澄清只问会改变目标、范围、安全或验收的阻塞问题；没有阻塞就不问。低风险可逆选择说明假设后推进，不固定必须问几题，不重复问已回答的问题，也不要求用户替代理读仓库。
 
-## Full route
+用户明确要求深入 grill 或逐题讨论时，才改为每轮只问一个最关键的决策问题，附推荐选择和取舍并等待回答。用户说停止访谈、按推荐走或直接做时，汇总已确定事项、假设和未决风险，结束提问；结束访谈不自动授权实施、Git 操作、发布或高风险行为。
 
-Full/exhaustive `grilling` is **explicit opt-in** only. Use it only when the user asks for `grill me`, `完整 grilling`, every decision branch, or an equivalent exhaustive stress-test.
+本技能只做澄清，不自动写文件或创建任务。只读请求保持只读；确需持久化的稳定术语或重要决策，先检查既有合适文档及写入授权，再交给已安装的领域建模能力或在授权范围内处理。不要为了访谈生成一套文档。
 
-## Domain facts
-
-Use `domain-modeling` only when stable terminology, bounded contexts, context maps, or an ADR decision actually needs to be created or changed. Evidence review and ordinary clarification do not write `CONTEXT.md`, `CONTEXT-MAP.md`, or ADR files.
-
-Return resolved blockers, recommended assumptions, and any necessary domain-document changes to the calling workflow. Do not scaffold or widen its root/mode/scope lock.
+输出已解决的分歧、推荐假设、真正阻塞的事项和可验证结果，交还当前任务，不扩张范围。

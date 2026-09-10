@@ -1,4 +1,4 @@
 interface:
-  display_name: "DXM 大项目开发规范"
-  short_description: "锁定项目根目录与工作模式，用可审计状态机治理初始化、验证和任务完成"
-  default_prompt: "Use $dxm to lock the canonical project root and workflow mode, inspect local evidence first, then apply the matching DXM readiness and completion gates."
+  display_name: "DXM 项目协作"
+  short_description: "精简项目规则，保留需求压力测试、真实验证与授权边界"
+  default_prompt: "Use $dxm to maintain scoped project collaboration rules, clarify consequential unknowns, and preserve existing content and authorization boundaries."

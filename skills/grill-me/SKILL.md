@@ -1,14 +1,16 @@
 ---
 name: grill-me
-description: Use when legacy prompts, DXM docs, or users refer to grill-me; prefer the current grilling skill for plan/design stress-tests and project-grill clarification.
+description: 用户明确调用 grill-me 或要求逐题 grill me 时使用。提供一轮一个关键问题的需求压力测试；不是普通开发任务的自动前置流程。
 ---
 
-# grill-me legacy alias
+# Grill Me
 
-This is a compatibility alias for `grilling`. Use `grilling` when available; otherwise follow the same contract below.
+这是用户可直接调用的逐题访谈入口，可以单独安装。已安装 `grilling` 时可使用其方法；未安装时按下面的完整约定执行，不安装依赖、不调用不存在的技能。
 
-Interview me relentlessly about every aspect of this plan until we reach a shared understanding. Walk down each branch of the design tree, resolving dependencies between decisions one-by-one. For each question, provide your recommended answer.
+先查本地证据，从真实目标和硬约束出发，挑战隐藏假设、过度方案和实现偏置。能从代码、文档、配置、测试或安全运行信息查到的事实不要问用户。
 
-Ask the questions one at a time, waiting for feedback on each question before continuing. Asking multiple questions at once is bewildering.
+每轮只问一个最关键的决策问题，给出推荐选择和取舍，等待回答。不要重复问已回答的问题；只深入会改变范围、架构、安全、验收或维护成本的分支。
 
-If a question can be answered by exploring the codebase, explore the codebase instead.
+用户说停止访谈、按推荐走或直接做时，汇总已确定事项、建议假设和未决风险，结束提问。目标、范围、关键约束和验收足够指导下一步时也应结束，不机械穷举。
+
+本技能只做访谈，不自动写文件、创建任务或更改配置。只读请求保持只读；结束访谈不自动授权实施、Git 操作、发布、部署或不可逆操作。关键风险未解决时停止受影响的危险动作，后续行动遵守用户当次授权。

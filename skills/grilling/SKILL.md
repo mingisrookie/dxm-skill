@@ -1,18 +1,18 @@
 ---
 name: grilling
-description: Use when the user explicitly asks for an exhaustive plan or design interview, says grill me, requests full grilling, or asks to stress-test every decision branch before building.
+description: 用户明确要求 grill me、逐题讨论、深入审问方案或完整需求压力测试时使用。不因普通编码、审查或轻量澄清自动启动长访谈。
 ---
 
-# Grilling
+# Grilling：逐题需求压力测试
 
-This is the full/exhaustive interview cadence and is **explicit opt-in** only. A default DXM `init`, `project-grill`, `new-project-grill`, or `lightweight-grill` uses the bounded 0–3-question contract instead of this skill.
+本技能可以独立使用，不依赖其他技能。仅用户明确要求时进入逐题访谈；资料里提到 grill 不等于用户已经选择该节奏。
 
-## Cadence
+先从第一性原理区分真实目标、外部硬约束、已知事实和待确认假设。检查相关代码、文档、配置、测试或安全运行信息；能查到的事实不要再问用户。
 
-1. Start from first principles and challenge hidden assumptions, fake constraints, over-scoped solutions, and implementation bias. Then use **local evidence first**: inspect code, docs, config, logs, tests, and safe runtime facts that can answer a question.
-2. Identify unresolved decisions and their dependencies. Do not ask the user for locally discoverable facts.
-3. Ask one decision question at a time, wait for the answer, and include a recommended answer with its trade-off.
-4. Walk only branches that can change scope, architecture, safety, acceptance, or maintenance. Stop when those decisions have a shared answer.
-5. If the user says `按推荐走`, `直接做`, or asks to stop interviewing, accept the stated recommendations and hand control back to the calling workflow.
+每轮只问一个最关键的决策问题，说明它为什么影响结果，给出推荐选择和取舍，然后等待用户回答。沿会改变范围、架构、安全、验收或维护成本的分支深入，挑战隐藏假设、过度方案和实现偏置；不要机械穷举所有话题。
 
-Do not scaffold, edit project files, or widen the caller's root/mode/scope lock merely because this interview is active.
+不要重复问已回答的问题。用户说停止访谈、按推荐走或直接做时，汇总已确定事项、建议假设和未决风险，结束提问。关键风险未解决时停止受影响的危险动作，而不是为了结束访谈假装问题已消失。
+
+本技能只做访谈，不自动写文件、生成文档、创建任务或更改配置。只读请求保持只读；结束访谈不自动授权实施、Git 操作、发布、部署或不可逆操作。后续行动遵守用户当次授权。
+
+当目标、范围、关键约束和验收足够指导下一步时就交还控制，不以“完全理解一切”作为永远无法达到的结束条件。最终给出已达成的决定、理由、未决问题和可验证的成功标准；可复用知识只有在获准写文档时才落盘。

@@ -45,13 +45,98 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      - name: Run unit tests
-        run: python -m unittest discover -s tests -v
+      - name: Check complete current skill package
+        run: python -B -m unittest discover -s tests -v
 
-      - name: Run packaged self-test
-        run: python skills/dxm/scripts/scaffold_dxm.py --self-test
 
-      - name: Verify copied-skill entry points
+  release:
+    name: Publish verified release
+    needs: test
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Check out the tested tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - name: Bind version and build clean archives
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          python skills/dxm/scripts/dxm.py --version
-          python skills/dxm/scripts/validate_dxm.py --version
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ "$(git rev-parse "$tag^{commit}")" == "$GITHUB_SHA" ]]
+          [[ "$(gh api "repos/$GH_REPO/commits/main" --jq '.sha')" == "$GITHUB_SHA" ]]
+          test -f "docs/releases/$tag.md"
+          python -B tools/package_release.py --tag "$tag" --output dist/release
+      - name: Upload draft and verify downloads before publishing
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          draft="$(gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+          if [[ "$draft" == "false" ]]; then
+            echo 'A published release already exists; refusing to replace it.' >&2
+            exit 1
+          elif [[ "$draft" == "true" ]]; then
+            gh release upload "$tag" dist/release/*.zip dist/release/SHA256SUMS --clobber
+          else
+            gh release create "$tag" dist/release/*.zip dist/release/SHA256SUMS \
+              --draft --verify-tag --target "$GITHUB_SHA" \
+              --title "DXM $tag" --notes-file "docs/releases/$tag.md"
+          fi
+          downloaded="$(mktemp -d)"
+          gh release download "$tag" --dir "$downloaded"
+          test "$(find "$downloaded" -maxdepth 1 -type f | wc -l)" -eq 3
+          cmp dist/release/SHA256SUMS "$downloaded/SHA256SUMS"
+          (cd "$downloaded" && sha256sum --check SHA256SUMS)
+          [[ "$(gh api "repos/$GH_REPO/commits/main" --jq '.sha')" == "$GITHUB_SHA" ]]
+          gh release edit "$tag" --draft=false --latest --notes-file "docs/releases/$tag.md"
+      - name: Verify published assets, Latest and release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          [[ "$(gh api "repos/$GH_REPO/releases/latest" --jq '.tag_name')" == "$tag" ]]
+          [[ "$(gh release view "$tag" --json isDraft --jq '.isDraft')" == "false" ]]
+          [[ "$(gh api "repos/$GH_REPO/commits/$tag" --jq '.sha')" == "$GITHUB_SHA" ]]
+          [[ "$(gh api "repos/$GH_REPO/commits/main" --jq '.sha')" == "$GITHUB_SHA" ]]
+          downloaded="$(mktemp -d)"
+          gh release download "$tag" --dir "$downloaded"
+          test "$(find "$downloaded" -maxdepth 1 -type f | wc -l)" -eq 3
+          cmp dist/release/SHA256SUMS "$downloaded/SHA256SUMS"
+          (cd "$downloaded" && sha256sum --check SHA256SUMS)
+          notes="$RUNNER_TEMP/dxm-published-notes.md"
+          cp "docs/releases/$tag.md" "$notes"
+          {
+            printf '\n## 发布核验\n\n'
+            printf -- '- 九组跨平台完整测试全部通过。\n'
+            printf -- '- 标签、main 与发布提交一致：`%s`。\n' "$GITHUB_SHA"
+            printf -- '- 已核验 Latest 为 `%s`，Release 已公开。\n' "$tag"
+            printf -- '- 草稿及公开 Release 的下载包均重新下载，SHA-256 与本地清单一致。\n'
+            printf -- '- [本次 CI 与发布日志](https://github.com/%s/actions/runs/%s)\n' "$GH_REPO" "$GITHUB_RUN_ID"
+            printf '\n```text\n'
+            cat dist/release/SHA256SUMS
+            printf '```\n'
+          } >> "$notes"
+          gh release edit "$tag" --notes-file "$notes"
+          gh release view "$tag" --json url,tagName,isDraft,assets
+          cat "$notes" >> "$GITHUB_STEP_SUMMARY"
