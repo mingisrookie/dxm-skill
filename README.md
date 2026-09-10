@@ -6,9 +6,9 @@ DXM 为 AI 补充项目事实、需求澄清方式、验证依据和授权边界
 
 ## 当前版本
 
-当前源码版本为 **3.0.0**。发布状态与下载资产以 [GitHub Release](https://github.com/mingisrookie/dxm-skill/releases/tag/v3.0.0) 为准。
+当前源码版本为 **3.0.1**。发布状态与下载资产以 [GitHub Release](https://github.com/mingisrookie/dxm-skill/releases/tag/v3.0.1) 为准。
 
-仅安装核心规则使用 `dxm-skill-core-v3.0.0.zip`；需要 Grill 等全部能力，使用 `dxm-skills-bundle-v3.0.0.zip` 并按需安装其中的技能。`SHA256SUMS` 用于校验两个下载包。
+仅安装核心规则使用 `dxm-skill-core-v3.0.1.zip`；需要 Grill 等全部能力，使用 `dxm-skills-bundle-v3.0.1.zip` 并按需安装其中的技能。`SHA256SUMS` 用于校验两个下载包。
 
 ## 怎么使用
 

@@ -119,8 +119,8 @@ class PackageTests(unittest.TestCase):
                 self.assertNotRegex(item.read_text(encoding="utf-8"), r"(?i)\b[A-Z]:[\\/]|/(?:Users|home)/[^\s/]+/")
 
     def test_consistent_version_and_release_documentation(self):
-        version = (ROOT / "VERSION").read_text().strip()
-        self.assertEqual(version, (CORE / "VERSION").read_text().strip())
+        version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        self.assertEqual(version, (CORE / "VERSION").read_text(encoding="utf-8").strip())
         self.assertRegex(version, r"^\d+\.\d+\.\d+(?:-dev)?$")
         changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -143,16 +143,16 @@ class PackageTests(unittest.TestCase):
         self.assertFalse((ROOT / ".trellis").exists())
         for directory in [".agents/skills", ".codex/agents"]:
             self.assertEqual(list((ROOT / directory).glob("trellis*")), [])
-        self.assertNotIn("trellis", (ROOT / ".gitattributes").read_text().lower())
+        self.assertNotIn("trellis", (ROOT / ".gitattributes").read_text(encoding="utf-8").lower())
 
     def test_private_state_stays_ignored(self):
-        text = (ROOT / ".gitignore").read_text()
+        text = (ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn(".trellis/", text)
         self.assertIn(".dxm/", text)
         self.assertNotIn("# DXM:START", text)
 
     def test_ci_covers_entire_test_directory(self):
-        text = (ROOT / ".github/workflows/ci.yml").read_text()
+        text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertIn("python -B -m unittest discover -s tests -v", text)
         self.assertNotIn("-p test_", text)
         self.assertIn("contents: read", text)
@@ -180,7 +180,7 @@ class NegativePackageTests(unittest.TestCase):
         shutil.copytree(CORE, self.package)
 
     def test_old_module_rejected(self):
-        (self.package / "old.py").write_text("# historical only\n")
+        (self.package / "old.py").write_text("# historical only\n", encoding="utf-8", newline="\n")
         self.assertTrue(any("unexpected file" in i for i in inspect_package(self.package)))
 
     def test_old_dependency_rejected(self):
@@ -202,7 +202,7 @@ class NegativePackageTests(unittest.TestCase):
         self.assertTrue(any("external package reference" in i for i in inspect_package(self.package)))
 
     def test_duplicate_metadata_rejected(self):
-        (self.package / "SKILL.md").write_text("---\nname: dxm\nname: other\ndescription: sample\n---\nBody\n")
+        (self.package / "SKILL.md").write_text("---\nname: dxm\nname: other\ndescription: sample\n---\nBody\n", encoding="utf-8", newline="\n")
         with self.assertRaises(ValueError):
             metadata(self.package / "SKILL.md")
 

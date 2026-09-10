@@ -1,5 +1,6 @@
 """Release assets are developer outputs, not a skill runtime."""
 from pathlib import Path
+import ast
 import hashlib
 import shutil
 import sys
@@ -22,7 +23,7 @@ class ReleaseTests(unittest.TestCase):
         self.root.mkdir()
         shutil.copytree(ROOT / "skills", self.root / "skills")
         shutil.copy2(ROOT / "VERSION", self.root / "VERSION")
-        self.tag = "v" + (ROOT / "VERSION").read_text().strip()
+        self.tag = "v" + (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
     def test_core_and_bundle_have_exact_contents_and_valid_hashes(self):
         assets = build_release(self.root, self.directory / "release", self.tag)
@@ -34,7 +35,7 @@ class ReleaseTests(unittest.TestCase):
             expected = {"skills/" + skill + "/" + name for skill, names in PACKAGE_FILES.items() for name in names}
             self.assertEqual(set(archive.namelist()), expected)
             self.assertIsNone(archive.testzip())
-        for line in assets[-1].read_text().splitlines():
+        for line in assets[-1].read_text(encoding="utf-8").splitlines():
             digest, name = line.split("  ", 1)
             self.assertEqual(hashlib.sha256((assets[-1].parent / name).read_bytes()).hexdigest(), digest)
 
@@ -56,7 +57,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertFalse((self.directory / "release").exists())
 
     def test_extra_runtime_file_is_not_packaged(self):
-        (self.root / "skills/dxm/old.py").write_text("# obsolete\n")
+        (self.root / "skills/dxm/old.py").write_text("# obsolete\n", encoding="utf-8", newline="\n")
         with self.assertRaises(ValueError):
             build_release(self.root, self.directory / "release", self.tag)
         self.assertFalse((self.directory / "release").exists())
@@ -93,6 +94,15 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("sha256sum --check SHA256SUMS", release)
         self.assertIn("--draft=false --latest", release)
         self.assertNotIn("pull_request_target", workflow)
+
+    def test_developer_text_io_is_explicitly_encoded(self):
+        sources = [*(ROOT / "tests").glob("*.py"), *(ROOT / "tools").glob("*.py")]
+        for source in sources:
+            tree = ast.parse(source.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {"read_text", "write_text"}:
+                    with self.subTest(file=source.name, line=node.lineno):
+                        self.assertTrue(any(k.arg == "encoding" for k in node.keywords), "Text I/O depends on the host default encoding")
 
     def test_published_release_cannot_be_silently_replaced(self):
         workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
