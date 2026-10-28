@@ -1,4 +1,4 @@
 interface:
   display_name: "DXM 项目协作"
-  short_description: "精简项目规则，保留需求压力测试、真实验证与授权边界"
-  default_prompt: "Use $dxm to maintain scoped project collaboration rules, clarify consequential unknowns, and preserve existing content and authorization boundaries."
+  short_description: "补齐项目背景，用自然表达、按需分工和真实验证推进已授权工作"
+  default_prompt: "Use $dxm to improve project context and collaboration rules, communicate clearly, and coordinate scoped work with real verification."

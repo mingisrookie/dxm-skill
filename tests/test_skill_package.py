@@ -11,7 +11,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ROOT / "skills"
 CORE = SKILLS / "dxm"
 NAMES = {"dxm", "grilling", "grill-me", "grill-with-docs", "domain-modeling"}
-CORE_FILES = {"SKILL.md", "VERSION", "LICENSE", "agents/openai.yaml", "assets/templates/AGENTS.md.template", "references/dxm-method.md"}
+CORE_FILES = {
+    "SKILL.md", "VERSION", "LICENSE", "agents/openai.yaml",
+    "assets/templates/AGENTS.md.template", "assets/templates/MULTI-AGENT.md.template",
+    "references/dxm-method.md", "references/communication.md", "references/project-context.md",
+}
 
 
 def metadata(path):
