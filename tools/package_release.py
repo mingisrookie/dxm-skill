@@ -8,7 +8,11 @@ import re
 import stat
 import zipfile
 
-CORE_FILES = {"SKILL.md", "VERSION", "LICENSE", "agents/openai.yaml", "assets/templates/AGENTS.md.template", "references/dxm-method.md"}
+CORE_FILES = {
+    "SKILL.md", "VERSION", "LICENSE", "agents/openai.yaml",
+    "assets/templates/AGENTS.md.template", "assets/templates/MULTI-AGENT.md.template",
+    "references/dxm-method.md", "references/communication.md", "references/project-context.md",
+}
 PACKAGE_FILES = {
     "dxm": CORE_FILES,
     "grilling": {"SKILL.md", "LICENSE"},
