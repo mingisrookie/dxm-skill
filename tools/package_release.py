@@ -12,8 +12,6 @@ CORE_FILES = {"SKILL.md", "VERSION", "LICENSE", "agents/openai.yaml", "assets/te
 PACKAGE_FILES = {
     "dxm": CORE_FILES,
     "grilling": {"SKILL.md", "LICENSE"},
-    "grill-me": {"SKILL.md", "LICENSE"},
-    "grill-with-docs": {"SKILL.md", "LICENSE"},
     "domain-modeling": {"SKILL.md", "LICENSE", "ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 }
 

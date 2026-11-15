@@ -23,7 +23,11 @@ class ReleaseTests(unittest.TestCase):
         self.root.mkdir()
         shutil.copytree(ROOT / "skills", self.root / "skills")
         shutil.copy2(ROOT / "VERSION", self.root / "VERSION")
-        self.tag = "v" + (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        # Build a stable version only in the disposable release fixture.
+        stable = (ROOT / "VERSION").read_text(encoding="utf-8").strip().removesuffix("-dev")
+        for target in (self.root / "VERSION", self.root / "skills/dxm/VERSION"):
+            target.write_text(stable + "\n", encoding="utf-8", newline="\n")
+        self.tag = "v" + stable
 
     def test_core_and_bundle_have_exact_contents_and_valid_hashes(self):
         assets = build_release(self.root, self.directory / "release", self.tag)
@@ -55,6 +59,15 @@ class ReleaseTests(unittest.TestCase):
             with self.subTest(tag=tag), self.assertRaises(ValueError):
                 build_release(self.root, self.directory / "release", tag)
         self.assertFalse((self.directory / "release").exists())
+
+    def test_development_source_cannot_use_a_stable_tag(self):
+        development = self.tag[1:] + "-dev\n"
+        for target in (self.root / "VERSION", self.root / "skills/dxm/VERSION"):
+            target.write_text(development, encoding="utf-8", newline="\n")
+        output = self.directory / "release"
+        with self.assertRaises(ValueError):
+            build_release(self.root, output, self.tag)
+        self.assertFalse(output.exists())
 
     def test_extra_runtime_file_is_not_packaged(self):
         (self.root / "skills/dxm/old.py").write_text("# obsolete\n", encoding="utf-8", newline="\n")

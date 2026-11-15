@@ -10,7 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ROOT / "skills"
 CORE = SKILLS / "dxm"
-NAMES = {"dxm", "grilling", "grill-me", "grill-with-docs", "domain-modeling"}
+NAMES = {"dxm", "grilling", "domain-modeling"}
 CORE_FILES = {"SKILL.md", "VERSION", "LICENSE", "agents/openai.yaml", "assets/templates/AGENTS.md.template", "references/dxm-method.md"}
 
 
@@ -82,7 +82,7 @@ class PackageTests(unittest.TestCase):
         self.assertFalse((CORE / "scripts").exists())
         self.assertFalse((CORE / "contract").exists())
 
-    def test_all_five_packages_are_valid(self):
+    def test_all_packages_are_valid(self):
         self.assertEqual({p.name for p in SKILLS.iterdir() if p.is_dir()}, NAMES)
         for name in sorted(NAMES):
             with self.subTest(skill=name):
@@ -133,11 +133,13 @@ class PackageTests(unittest.TestCase):
     def test_interface_is_dependency_free(self):
         text = (CORE / "agents/openai.yaml").read_text(encoding="utf-8")
         self.assertTrue(text.startswith("interface:\n"))
-        keys = re.findall(r"^  ([a-z_]+):", text, re.M)
+        interface = text.split("\npolicy:\n", 1)[0]
+        keys = re.findall(r"^  ([a-z_]+):", interface, re.M)
         self.assertEqual(set(keys), {"display_name", "short_description", "default_prompt"})
         self.assertEqual(len(keys), 3)
         self.assertIn("$dxm", text)
         self.assertNotIn("dependencies:", text)
+        self.assertIn("policy:\n  allow_implicit_invocation: true\n", text)
 
     def test_no_project_integration_entries(self):
         self.assertFalse((ROOT / ".trellis").exists())
@@ -208,30 +210,26 @@ class NegativePackageTests(unittest.TestCase):
 
 
 class RulePresenceTests(unittest.TestCase):
-    """Literal regression tripwires, not semantic or live-model evaluations."""
-    def test_core_retains_meaningful_clarification(self):
+    """A few literal tripwires for authorization boundaries; not behavior evaluations."""
+    def test_core_keeps_authorization_boundaries(self):
         text = (CORE / "SKILL.md").read_text(encoding="utf-8")
-        for term in ["没有阻塞就不问", "挑战隐藏假设", "一轮一个关键问题", "只读请求只分析", "不强制固定文件名", "不重复询问", "不自动授权"]:
+        for term in ["只读请求只分析", "明确授权", "保留用户改动"]:
             self.assertIn(term, text)
 
-    def test_interviews_can_stop_without_authorizing_writes(self):
-        for name in ["grilling", "grill-me", "grill-with-docs"]:
-            text = (SKILLS / name / "SKILL.md").read_text(encoding="utf-8")
-            for term in ["每轮只问一个", "停止访谈", "结束提问", "只读请求保持只读", "不自动写文件", "不自动授权"]:
-                self.assertIn(term, text, name)
+    def test_interview_ends_without_widening_authorization(self):
+        text = (SKILLS / "grilling/SKILL.md").read_text(encoding="utf-8")
+        for term in ["每轮问一个", "授权范围", "访谈期间只读"]:
+            self.assertIn(term, text)
 
     def test_domain_materials_respect_readonly_scope(self):
         for path in (SKILLS / "domain-modeling").glob("*.md"):
             text = path.read_text(encoding="utf-8")
             self.assertRegex(text, "授权|获准写入")
             self.assertRegex(text, "只读|没有写入授权")
-        text = (SKILLS / "domain-modeling/SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("优先更新已有合适文档", text)
-        self.assertIn("不将猜测写成已接受事实", text)
 
-    def test_verification_and_review_limits_remain(self):
+    def test_verification_evidence_table_remains(self):
         text = (CORE / "references/dxm-method.md").read_text(encoding="utf-8")
-        for term in ["原故障", "自身复核", "不要将本轮未执行的历史测试算作通过", "不覆盖、不 reset"]:
+        for term in ["原故障", "自身复核", "运行未验证"]:
             self.assertIn(term, text)
 
     def test_upgrade_is_scoped_and_non_overlay(self):

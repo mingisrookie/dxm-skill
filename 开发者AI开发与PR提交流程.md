@@ -143,7 +143,7 @@ gh pr view <PR_NUMBER> --json number,title,baseRefName,headRefName,state,isDraft
 
 发布完成前必须实际检查，且先绑定当前仓库和版本变量：
 
-```bash
+```powershell
 $repo = gh repo view --json nameWithOwner --jq .nameWithOwner
 $branch = git branch --show-current
 $tag = "v$(Get-Content VERSION)"
